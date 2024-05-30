@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.9.34902.65
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "wa-sqlite.BlazorWasmSqlite", "wa-sqlite.BlazorWasmSqlite\wa-sqlite.BlazorWasmSqlite.csproj", "{3EB27010-8F7B-4B79-9367-868E8F26744F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "wa-sqlite.BlazorWasmSqlite.BlazorWasmTestApp", "wa-sqlite.BlazorWasmSqlite.BlazorWasmTestApp\wa-sqlite.BlazorWasmSqlite.BlazorWasmTestApp.csproj", "{93ED5180-50D0-4DDD-969C-4AF54FE0D3DD}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3EB27010-8F7B-4B79-9367-868E8F26744F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3EB27010-8F7B-4B79-9367-868E8F26744F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3EB27010-8F7B-4B79-9367-868E8F26744F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3EB27010-8F7B-4B79-9367-868E8F26744F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{93ED5180-50D0-4DDD-969C-4AF54FE0D3DD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{93ED5180-50D0-4DDD-969C-4AF54FE0D3DD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{93ED5180-50D0-4DDD-969C-4AF54FE0D3DD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{93ED5180-50D0-4DDD-969C-4AF54FE0D3DD}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {1082367A-0F15-4BCC-B125-5DAA54966E03}
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>wa_sqlite.BlazorWasmSqlite</RootNamespace>
+  </PropertyGroup>
+
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="8.0.5" />
+  </ItemGroup>
+	
+	
+		<PropertyGroup Condition="'$(Configuration)' == 'Debug|AnyCPU'">
+		<NpmConfiguration>dev</NpmConfiguration>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)' == 'Release|AnyCPU'">
+		<NpmConfiguration>prod</NpmConfiguration>
+	</PropertyGroup>
+	<!--$(NpmConfiguration)-->
+
+	<Target Name="InstallAndRunNpm" BeforeTargets="PreBuildEvent">
+		<Exec Command="npm install" WorkingDirectory="NpmJS" />
+		<Exec Command="npm run-script prod" WorkingDirectory="NpmJS" />
+	</Target>
+	
+
+</Project>

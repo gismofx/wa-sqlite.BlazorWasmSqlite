@@ -1,0 +1,119 @@
+﻿@page "/"
+
+@inject SqliteWasmInterop sqlite;
+
+<PageTitle>Home</PageTitle>
+<MudContainer Gutters=true>
+<MudGrid>
+    <MudItem xs="12" Class="mt-2">
+        <MudPaper Class="pa-2">
+            <MudStack Row="true">
+                <MudText Typo="Typo.h6">Status: @Status</MudText>
+                <MudButton Variant="Variant.Filled" OnClick="@(async ()=> await OpenClick())">Open</MudButton>
+                <MudButton Variant="Variant.Filled" OnClick="@(async ()=> await InsertTableAndData())">Add Sample Data</MudButton>
+            </MudStack>
+            </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="4">
+        <MudPaper >
+            <MudList ReadOnly="false" T="SqliteTableInfo">
+                <MudListItem Text="Refresh Tables" Icon="@Icons.Material.Filled.Refresh" OnClick="@(async ()=>await RefreshTablesClick())"/>
+                <MudDivider />
+                @foreach (var table in Tables)
+                {
+                    <MudListItem Value="@table" Text="@table.Name" Icon="@Icons.Material.Filled.TableRows" ExpandedChanged="@(async (b) => await LoadColumns(table.Name))">
+                     <NestedList>
+                         @foreach (var col in table.Columns)
+                            {
+                                <MudListItem Text="@col.Name" Icon="@Icons.Material.Filled.DataArray" />
+                            }
+                    </NestedList>
+                    </MudListItem>
+                }
+            </MudList>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="8">
+        <MudPaper>
+            <MudStack>
+                <MudTextField Lines="10" Variant="Variant.Outlined" Label="Query" @bind-Value="@Query"></MudTextField>
+                <MudButton Variant="Variant.Filled"  OnClick="@(async () => await ExecuteQueryClick())">Execute</MudButton>
+                <MudTextField Lines="10" Variant="Variant.Filled" Label="Result" @bind-Value="@QueryResult"></MudTextField>
+            </MudStack>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+</MudContainer>
+
+
+
+@code{
+    private string Status = "Closed";
+
+    private string Query = string.Empty;
+
+    private string QueryResult = string.Empty;
+
+    private IEnumerable<SqliteTableInfo> Tables = Enumerable.Empty<SqliteTableInfo>();
+
+    private async Task RefreshTablesClick()
+    {
+        Tables = await sqlite.QueryAllTables();
+    }
+
+    private async Task LoadColumns(string tableName)
+    {
+        var columns = await sqlite.QueryTableSchema(tableName);
+        Tables.Where(x => x.Name == tableName).First().Columns = columns;
+    }
+
+    private async Task OpenClick()
+    {
+        var result = await sqlite.Open();
+        Status = result.HasValue ? "Open" : "Closed";
+    }
+
+    private async ValueTask ExecuteQueryClick()
+    {
+        if (string.IsNullOrWhiteSpace(Query)) return;
+
+        var result = await sqlite.Query(Query);
+        QueryResult = ToJsonString(result);
+
+    //var result = await sqlite.Execute()
+    }
+
+    private string ToJsonString(IEnumerable<System.Text.Json.Nodes.JsonNode> results)
+    {
+        var opts = new System.Text.Json.JsonSerializerOptions() { WriteIndented = true };
+        return string.Join(Environment.NewLine, results.Select(x => x.ToJsonString(opts)));
+    }
+
+    private async Task InsertTableAndData()
+    {
+        var tableCreate = @"CREATE TABLE IF NOT EXISTS contacts (
+	                id INTEGER PRIMARY KEY,
+	                FirstName TEXT NOT NULL,
+	                LastName TEXT NOT NULL,
+	                Email TEXT UNIQUE,
+	                epochTimeSeconds NUMERIC)";
+
+        var result = await sqlite.Execute(tableCreate);
+
+        var sqlInsert =
+            @"INSERT INTO contacts (id, firstName, LastName, Email, EpochTimeSeconds)
+        VALUES 
+        (1,'Bob','Dob','bob@email.com',1),
+        (2,'Tina','Tuna','tina@email.com',2),
+        (3,'Rob','Lob','rob@email.com',3),
+        (4,'John','Shmon','john@email.com',4),
+        (5,'Sam','Ham','sam@email.com',5),
+        (6,'Rachel','Achel','rachel@email.com',6)";
+
+        result += Environment.NewLine + await sqlite.Execute(sqlInsert);
+
+
+    }
+
+
+}
