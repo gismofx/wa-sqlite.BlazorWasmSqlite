@@ -38,6 +38,7 @@
             <MudStack>
                 <MudTextField Lines="10" Variant="Variant.Outlined" Label="Query" @bind-Value="@Query"></MudTextField>
                 <MudButton Variant="Variant.Filled"  OnClick="@(async () => await ExecuteQueryClick())">Execute</MudButton>
+                <MudButton Variant="Variant.Filled" OnClick="@(async () => await ExecuteQueryParam())">Execute Param</MudButton>
                 <MudTextField Lines="10" Variant="Variant.Filled" Label="Result" @bind-Value="@QueryResult"></MudTextField>
             </MudStack>
         </MudPaper>
@@ -80,7 +81,16 @@
         var result = await sqlite.Query(Query);
         QueryResult = ToJsonString(result);
 
-    //var result = await sqlite.Execute()
+    }
+
+    private async ValueTask ExecuteQueryParam()
+    {
+        var sql = @"Select * from contacts where id=@id";
+
+        var sparams = new Dictionary<string, object>();
+        sparams.Add("@id", 1);
+        var result = await sqlite.Query<System.Text.Json.Nodes.JsonNode>(sql,sparams);
+        QueryResult = ToJsonString(result);
     }
 
     private string ToJsonString(IEnumerable<System.Text.Json.Nodes.JsonNode> results)
@@ -110,7 +120,7 @@
         (5,'Sam','Ham','sam@email.com',5),
         (6,'Rachel','Achel','rachel@email.com',6)";
 
-        result += Environment.NewLine + await sqlite.Execute(sqlInsert);
+        var queryResult = result.ToString() + Environment.NewLine + await sqlite.Execute(sqlInsert);
 
 
     }

@@ -73,12 +73,18 @@ namespace wa_sqlite.BlazorWasmSqlite
 
         private class QueryResult
         {
+            public int Changes { get; set; } = 0;
             public dynamic Data { get; set; } = null!;
             public List<List<string>> Columns { get; set; } = null!;
             public string Error { get; set; }
         }
 
-        public async ValueTask<string> Execute(string query)
+        /// <summary>
+        /// Execute a query and return the quantity of changed rows
+        /// </summary>
+        /// <param name="query"></param>
+        /// <returns></returns>
+        public async ValueTask<int> Execute(string query)
         {
             var tState = State;
             if (State == ConnectionState.Closed)
@@ -90,7 +96,7 @@ namespace wa_sqlite.BlazorWasmSqlite
                 await Close();
             //return result;
             
-            return string.Empty;
+            return result.Changes;
         }
 
         
@@ -100,6 +106,20 @@ namespace wa_sqlite.BlazorWasmSqlite
             return await Query<JsonNode>(query);
         }
 
+        public async ValueTask<IEnumerable<T>> Query<T>(string query, Dictionary<string,object> parameters)
+        {
+            var tState = State;
+            if (State == ConnectionState.Closed)
+                await Open();
+
+            var opt = new JsonSerializerOptions() { PropertyNameCaseInsensitive = true, };
+            var jsonResult = await _JsRuntime.InvokeAsync<JsonNode>("sqlite.query", _CurrentDB, query, parameters);
+            var result = JsonSerializer.Deserialize<IEnumerable<T>>(jsonResult, opt);
+
+            if (tState == ConnectionState.Closed)
+                await Close();
+            return result;
+        }
 
         public async ValueTask<IEnumerable<T>> Query<T>(string query)
         {
