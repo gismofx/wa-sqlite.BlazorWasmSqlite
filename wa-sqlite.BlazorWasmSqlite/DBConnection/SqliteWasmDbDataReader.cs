@@ -7,7 +7,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace wa_sqlite.BlazorWasmSqlite
+namespace wa_sqlite.BlazorWasmSqlite.DBConnection
 {
     internal class SqliteWasmDbDataReader : DbDataReader
     {

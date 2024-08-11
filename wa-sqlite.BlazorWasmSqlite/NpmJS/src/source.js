@@ -39,22 +39,55 @@ window.sqlite = {
 
     /*Execute a sql command
     */
-    execute: async function (dbConn, query) {
+    execute: async function (dbConn, sql, parameters = null) {
         
-        let result = {changes: 0 ,response: null, data:"", error:""};
-        try {
-            let response = await sqlite.sqlite3.exec(dbConn, query, (row, columns) => {
-                result.data = row[0];
-                console.log(columns);
-            });
-            result.response = response;
-            result.changes = sqlite.sqlite3.changes(dbConn);
-            return result;
+        //let result = {changes: 0 ,response: null, data:"", error:""};
+        //try {
+        //    let response = await sqlite.sqlite3.exec(dbConn, query, (row, columns) => {
+        //        result.data = row[0];
+        //        console.log(columns);
+        //    });
+        //    result.response = response;
+        //    result.changes = sqlite.sqlite3.changes(dbConn);
+        //    return result;
+        //}
+        //catch (error) {
+        //    result.error = error.message
+        //    return result;
+        //}
+        //let result = { result: [] };
+        let result = { changes: 0, response: null, data: "", error: "" };
+
+        for await (const stmt of sqlite.sqlite3.statements(dbConn, sql)) {
+
+            if (parameters != null) {
+                let bindresult = await sqlite.sqlite3.bind_collection(stmt, parameters);
+                if (bindresult != SQLite.SQLITE_OK) {
+                    console.error("unable to prepare");
+                    result.error = "Unable to Prepare statement. Check your syntax or parameters";
+                    return result;
+                }
+            }
+            console.log("Sql: " + sqlite.sqlite3.sql(stmt));
+            //console.log("Sql: " + sqlite.sqlite3.expanded_sql(stmt));
+            let columns;
+            try {
+                while (await sqlite.sqlite3.step(stmt) === SQLite.SQLITE_ROW) {
+                    columns = columns ?? sqlite.sqlite3.column_names(stmt);
+                    const row = sqlite.sqlite3.row(stmt);
+                    //let rowObj = resultToRow(columns, row);
+                    //result.result.push(resultToRow(columns, row));
+                    result.response = response;
+                    result.changes = sqlite.sqlite3.changes(dbConn);
+                }
+            }
+            catch (error) {
+                console.log(error.message);
+                result.error = error.message
+                //    return result;
+            }
         }
-        catch (error) {
-            result.error = error.message
-            return result;
-        }
+        return result;
 
     },
 

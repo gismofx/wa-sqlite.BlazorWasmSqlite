@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 //using System.Data.SQLite;
 using System.Data.Common;
 
-namespace wa_sqlite.BlazorWasmSqlite
+namespace wa_sqlite.BlazorWasmSqlite.DBConnection
 {
     public class SqliteWasmConnection : DbConnection, IDbConnection
     {

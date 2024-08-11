@@ -6,7 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace wa_sqlite.BlazorWasmSqlite
+namespace wa_sqlite.BlazorWasmSqlite.DBConnection
 {
     internal class SqliteWasmCommand : DbCommand
     {
@@ -18,15 +18,15 @@ namespace wa_sqlite.BlazorWasmSqlite
         }
 
         public override string CommandText { get; set; }
-        public override int CommandTimeout { get ; set; }
-        public override CommandType CommandType { get ; set; }
-        public override bool DesignTimeVisible { get ; set; }
-        public override UpdateRowSource UpdatedRowSource { get ; set; }
-        protected override DbConnection? DbConnection { get ; set; }
+        public override int CommandTimeout { get; set; }
+        public override CommandType CommandType { get; set; }
+        public override bool DesignTimeVisible { get; set; }
+        public override UpdateRowSource UpdatedRowSource { get; set; }
+        protected override DbConnection? DbConnection { get; set; }
 
         protected override DbParameterCollection DbParameterCollection => throw new NotImplementedException();
 
-        protected override DbTransaction? DbTransaction { get ; set; }
+        protected override DbTransaction? DbTransaction { get; set; }
 
         public override void Cancel()
         {
@@ -63,7 +63,7 @@ namespace wa_sqlite.BlazorWasmSqlite
         {
             switch (behavior)
             {
-                case CommandBehavior.SequentialAccess|CommandBehavior.CloseConnection:
+                case CommandBehavior.SequentialAccess | CommandBehavior.CloseConnection:
                     //_interop.
                     //return new SqliteWasmDbDataReader();
                     break;

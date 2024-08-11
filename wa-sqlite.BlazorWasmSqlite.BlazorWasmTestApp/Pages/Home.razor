@@ -1,6 +1,8 @@
 ﻿@page "/"
 
 @inject SqliteWasmInterop sqlite;
+@using wa_sqlite.BlazorWasmSqlite.Attributes
+@using wa_sqlite.BlazorWasmSqlite.Extensions
 
 <PageTitle>Home</PageTitle>
 <MudContainer Gutters=true>
@@ -11,6 +13,7 @@
                 <MudText Typo="Typo.h6">Status: @Status</MudText>
                 <MudButton Variant="Variant.Filled" OnClick="@(async ()=> await OpenClick())">Open</MudButton>
                 <MudButton Variant="Variant.Filled" OnClick="@(async ()=> await InsertTableAndData())">Add Sample Data</MudButton>
+                <MudButton Variant="Variant.Filled" OnClick="@(async ()=> await UpsertClick())">Upsert Test</MudButton>
             </MudStack>
             </MudPaper>
     </MudItem>
@@ -25,7 +28,7 @@
                      <NestedList>
                          @foreach (var col in table.Columns)
                             {
-                                <MudListItem Text="@col.Name" Icon="@Icons.Material.Filled.DataArray" />
+                                <MudListItem Text="@($"{col.Name}({col.Type})")" Icon="@Icons.Material.Filled.DataArray" />
                             }
                     </NestedList>
                     </MudListItem>
@@ -95,6 +98,7 @@
 
     private string ToJsonString(IEnumerable<System.Text.Json.Nodes.JsonNode> results)
     {
+        if (results.Count() == 0) return "The query returned no results.";
         var opts = new System.Text.Json.JsonSerializerOptions() { WriteIndented = true };
         return string.Join(Environment.NewLine, results.Select(x => x.ToJsonString(opts)));
     }
@@ -123,6 +127,49 @@
         var queryResult = result.ToString() + Environment.NewLine + await sqlite.Execute(sqlInsert);
 
 
+    }
+
+    private class model
+    {
+        [ExplicitKey]
+        public int Id { get; set; }
+        public string FirstName { get; set; }
+        public string LastName { get; set; }
+        public string Email { get; set; }
+        public long EpochTimeSeconds { get; set; }
+
+    }
+
+    private async Task UpsertClick()
+    {
+        var models = new List<model>();
+        var m = new model()
+            {
+
+                Id = 10,
+                Email = "email@bemail.com",
+                FirstName = "Grog",
+                LastName = "Dog",
+                EpochTimeSeconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+
+            };
+
+        var m2 = new model()
+            {
+
+                Id = 11,
+                Email = "email@bemail.com",
+                FirstName = "Grog2",
+                LastName = "Dog2",
+                EpochTimeSeconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+
+            };
+
+        models.Add(m);
+        models.Add(m2);
+        var tableName = "Contacts";
+
+        var what = await sqlite.Upsert<model>(models, tableName);
     }
 
 

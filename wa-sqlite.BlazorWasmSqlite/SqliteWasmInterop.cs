@@ -1,5 +1,6 @@
 ﻿using Microsoft.JSInterop;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
@@ -10,6 +11,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
+using wa_sqlite.BlazorWasmSqlite.DBConnection;
 
 namespace wa_sqlite.BlazorWasmSqlite
 {
@@ -76,7 +78,7 @@ namespace wa_sqlite.BlazorWasmSqlite
             public int Changes { get; set; } = 0;
             public dynamic Data { get; set; } = null!;
             public List<List<string>> Columns { get; set; } = null!;
-            public string Error { get; set; }
+            public string Error { get; set; } = string.Empty;
         }
 
         /// <summary>
@@ -84,13 +86,13 @@ namespace wa_sqlite.BlazorWasmSqlite
         /// </summary>
         /// <param name="query"></param>
         /// <returns></returns>
-        public async ValueTask<int> Execute(string query)
+        public async Task<int> Execute(string query, Dictionary<string, object> parameters = null)
         {
             var tState = State;
             if (State == ConnectionState.Closed)
                 await Open();
 
-            var result = await _JsRuntime.InvokeAsync<QueryResult>("sqlite.execute",_CurrentDB, query);
+            var result = await _JsRuntime.InvokeAsync<QueryResult>("sqlite.execute",_CurrentDB, query, parameters);
             
             if (tState == ConnectionState.Closed)
                 await Close();
@@ -99,40 +101,41 @@ namespace wa_sqlite.BlazorWasmSqlite
             return result.Changes;
         }
 
-        
 
-        public async ValueTask<IEnumerable<JsonNode>> Query(string query)
+
+        public async Task<IEnumerable<JsonNode>> Query(string query)
         {
-            return await Query<JsonNode>(query);
+            return await QueryRaw<IEnumerable<JsonNode>>(query,null);
+            //return await Query<JsonNode>(query);
         }
 
-        public async ValueTask<IEnumerable<T>> Query<T>(string query, Dictionary<string,object> parameters)
+        public async Task<IEnumerable<T>> Query<T>(string query, Dictionary<string,object> parameters)
         {
-            var tState = State;
-            if (State == ConnectionState.Closed)
-                await Open();
+            //var tState = State;
+            //if (State == ConnectionState.Closed)
+            //    await Open();
 
             var opt = new JsonSerializerOptions() { PropertyNameCaseInsensitive = true, };
-            var jsonResult = await _JsRuntime.InvokeAsync<JsonNode>("sqlite.query", _CurrentDB, query, parameters);
+            var jsonResult = await QueryRaw(query, parameters);
             var result = JsonSerializer.Deserialize<IEnumerable<T>>(jsonResult, opt);
 
-            if (tState == ConnectionState.Closed)
-                await Close();
+            //if (tState == ConnectionState.Closed)
+            //    await Close();
             return result;
         }
 
-        public async ValueTask<IEnumerable<T>> Query<T>(string query)
+        public async Task<IEnumerable<T>> Query<T>(string query)
         {
-            var tState = State;
-            if (State == ConnectionState.Closed)
-                await Open();
+            //var tState = State;
+            //if (State == ConnectionState.Closed)
+            //    await Open();
             
             var opt = new JsonSerializerOptions() { PropertyNameCaseInsensitive = true, };
-            var jsonResult = await _JsRuntime.InvokeAsync<JsonNode>("sqlite.query", _CurrentDB, query);
+            var jsonResult = await QueryRaw(query);
             var result = JsonSerializer.Deserialize<IEnumerable<T>>(jsonResult,opt);
             
-            if (tState == ConnectionState.Closed)
-                await Close();
+            //if (tState == ConnectionState.Closed)
+            //    await Close();
             return result;
         }
 
@@ -140,6 +143,42 @@ namespace wa_sqlite.BlazorWasmSqlite
         {
             return (await Query<T>(query)).First();
         }
+
+        /// <summary>
+        /// Return a single value from the database. Such as an aggregrate function. i.e. Count,Sum, etc
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="query"></param>
+        /// <returns></returns>
+        public async Task<T> ExecuteScalar<T>(string query)
+        {
+            var json = await QueryRaw<JsonElement>(query);
+            if (json.GetArrayLength() == 0) return default;
+            //nothing was returned from the query
+            var d = json[0].Deserialize<Dictionary<string, T>>();
+            return d.First().Value;
+            //return default(T);
+        }
+
+        public async Task<JsonNode> QueryRaw(string query, Dictionary<string, object> parameters = null)
+        {
+            return await QueryRaw<JsonNode>(query, parameters);
+        }
+
+        public async Task<T> QueryRaw<T>(string query, Dictionary<string, object> parameters = null)
+        {
+            var tState = State;
+            if (State == ConnectionState.Closed)
+                await Open();
+
+            var jsonResult = await _JsRuntime.InvokeAsync<T>("sqlite.query", _CurrentDB, query, parameters);
+            //var jsonResult = await _JsRuntime.InvokeAsync<T>("sqlite.query", _CurrentDB, query);
+
+            if (tState == ConnectionState.Closed)
+                await Close();
+            return jsonResult;
+        }
+
 
 
         public async ValueTask DisposeAsync()
@@ -166,7 +205,31 @@ namespace wa_sqlite.BlazorWasmSqlite
             return tables;
         }
 
+
+        /// <summary>
+        /// Check if a table exists
+        /// </summary>
+        /// <param name="tableName"></param>
+        /// <returns></returns>
+        public async Task<bool> TableExists(string tableName)
+        {
+            var sql = $"SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = '{tableName}'";
+            var result = Convert.ToBoolean(await ExecuteScalar<int>(sql));
+            return result;
+        }
+
+        /// <summary>
+        /// Get the Table Create code for a given table
+        /// </summary>
+        /// <param name="tableName"></param>
+        /// <returns></returns>
+        public async Task<string> GetTableCreate(string tableName)
+        {
+            return await ExecuteScalar<string>($"Select sql from sqlite_schema where name = '{tableName}';");
+        }
+
         #endregion
+
 
     }
 }
