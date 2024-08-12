@@ -1,3 +1,4 @@
+require('@xmtp/wa-sqlite');
 import SQLiteAsyncESMFactory from 'wa-sqlite/dist/wa-sqlite-async.mjs';
 import * as SQLite from 'wa-sqlite';
 import { IDBBatchAtomicVFS } from 'wa-sqlite/src/examples/IDBBatchAtomicVFS'; //' ./wa-sqlite/src/examples/IndexedDbVFS.js'
@@ -74,7 +75,7 @@ window.sqlite = {
             try {
                 while (await sqlite.sqlite3.step(stmt) === SQLite.SQLITE_ROW) {
                     columns = columns ?? sqlite.sqlite3.column_names(stmt);
-                    const row = sqlite.sqlite3.row(stmt);
+                    //const row = sqlite.sqlite3.row(stmt);
                     //let rowObj = resultToRow(columns, row);
                     //result.result.push(resultToRow(columns, row));
                     result.response = response;
@@ -101,32 +102,48 @@ window.sqlite = {
     parameters:dictionary/object - contains the parameters you for your sql statement
     */
     query: async function (dbConn, sql, parameters = null) {
-        let result = { result: [] };
-        for await (const stmt of sqlite.sqlite3.statements(dbConn, sql)) {
-
-            if (parameters != null) {
-                let bindresult = await sqlite.sqlite3.bind_collection(stmt, parameters);
-                if (bindresult != SQLite.SQLITE_OK) {
-                    console.error("unable to prepare");
-                    return null;
+        let result = { data: [], error: "" };
+        try {
+            for await (const stmt of sqlite.sqlite3.statements(dbConn, sql)) {
+                if (parameters != null) {
+                    let bindresult = await sqlite.sqlite3.bind_collection(stmt, parameters);
+                    if (bindresult != SQLite.SQLITE_OK) {
+                        console.error("unable to prepare");
+                        return null;
+                    }
+                }
+                //Execute the statement(s)
+                try {
+                    let columns;
+                    while (await sqlite.sqlite3.step(stmt) === SQLite.SQLITE_ROW) {
+                        columns = columns ?? sqlite.sqlite3.column_names(stmt);
+                        const row = sqlite.sqlite3.row(stmt);
+                        //let rowObj = resultToRow(columns, row);
+                        result.data.push(resultToRow(columns, row));
+                    }
+                }
+                catch (error) {
+                    result.error = error.message
+                    console.log("Query Error: " + error.message);
+                    //return null;
                 }
             }
-            console.log("Sql: " + sqlite.sqlite3.sql(stmt));
-            let columns;
-            
-
-            while (await sqlite.sqlite3.step(stmt) === SQLite.SQLITE_ROW) {
-                columns = columns ?? sqlite.sqlite3.column_names(stmt);
-                const row = sqlite.sqlite3.row(stmt);
-                //let rowObj = resultToRow(columns, row);
-                result.result.push(resultToRow(columns, row));
-            }
         }
-        return result.result; // SQLite.SQLITE_OK;
-    },
+        catch (error) {
+            console.log("Query Error when preparing statements: " + error.message);
+            result.error = error.message;
+            return result;
+        }
+        
+        
 
+        
+
+        return result; // SQLite.SQLITE_OK;
+    },
+    /*
     queryold: async function (dbConn, query) {
-        let result2 = { result: [] };
+        let result2 = { result: [], error='' };
         try {
             let response = await sqlite.sqlite3.exec(dbConn, query, (row, columns) => {
                 let i = 0;
@@ -148,7 +165,7 @@ window.sqlite = {
         }
 
     },
-
+    */
     //showPrompt: async function(message) {
     //    return prompt(message, 'Type anything here');
     //}

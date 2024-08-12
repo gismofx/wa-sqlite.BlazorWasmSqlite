@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Data;
+using System.Data.Common;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -26,9 +27,8 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
 
         public static async Task<int> Upsert<T>(this SqliteWasmInterop interop, IEnumerable<T> records, string tableName) //where T : IEnumerable<T>
         {
-            //var props = GetAllColumns<T>();
-            //return null;
-            var type = GetTypeOrGenericType(typeof(T));
+            //var type = GetTypeOrGenericType(typeof(T));
+            var type = typeof(T);
             var columnProperties = GetAllColumns<T>();
             var columns = columnProperties.Select(x => x.Name);
 
@@ -38,15 +38,57 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
                 throw new ArgumentException("Entity must have at least one [Key] or [ExplicitKey] property");
 
             //var sql = 
-            return await interop.ReplaceInto<T>(tableName, columns, records, null, null);//, transaction, commandTimeout);
+            //return await interop.ReplaceInto<T>(tableName, columns, records, null, null);//, transaction, commandTimeout);
 
-            return 0;
+            return await interop.Upsert<T>(tableName, columns, records);
+
         }
 
-        public static async Task<int> UpsertSingle<T>(this SqliteWasmInterop interop, T record, string tableName)
+        private static async Task<int> Upsert<T>(this SqliteWasmInterop interop, string tableName, IEnumerable<string> columns, IEnumerable<T> entitiesToUpsert)
         {
-            return await interop.Upsert(new List<T>() { record }, tableName);
+            var valueSb = new StringBuilder();
+            var inserts = new List<string>();//list of each record's values in sql format in columm order
+            long i = 0;
+            var sqlParams = new Dictionary<string, object>();//Key-Value pairs of parameter and value for query
+
+            foreach (var entity in entitiesToUpsert)
+            {
+                var recordAsDict = JsonSerializer.Deserialize<Dictionary<string, object>>(JsonSerializer.Serialize(entity));
+                var valueList = new List<string>();
+                foreach (var column in columns)
+                {
+                    var p = $"@p{i}";
+                    sqlParams.Add(p, recordAsDict![column]);// maybe needs @ symbol?
+                    //dynamicParams.Add(p, record[column]);
+                    valueList.Add(p);// $"@{p}");
+                    i++;
+                }
+                valueSb.Append("(");
+                valueSb.Append(string.Join(",", valueList));
+                valueSb.Append(")");
+                inserts.Add(valueSb.ToString());
+                valueSb.Clear();
+            }
+
+            var columnSet = new List<string>();
+            foreach (var column in columns)
+            {
+                columnSet.Add($"{column} = excluded.{column}");
+            }
+
+            var onConflictDoUpdate = $"ON CONFLICT (Id) DO UPDATE SET {string.Join(',', columnSet)}";
+                //e.g. "ON CONFLICT(name) DO UPDATE SET phonenumber=excluded.phonenumber;"
+            var cmd = $"INSERT INTO {tableName} ({String.Join(",", columns)}) VALUES {String.Join(",", inserts)} {onConflictDoUpdate}";
+            return await interop.Execute(cmd, sqlParams);
+
+            //return await interop ReplaceInto(intoTableName, columns, inserts, sqlParams, transaction, commandTimeout);
         }
+
+
+        //public static async Task<int> ReplaceInto<T>(this SqliteWasmInterop interop, T record, string tableName)
+        //{
+        //    return await interop.Upsert(new List<T>() { record }, tableName);
+        //}
 
         /// <summary>
         /// Get the type. If the type is IEnumerable, get the containing type
@@ -134,6 +176,8 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             return computedProperties;
         }
 
+
+    
 
         private static async Task<int> ReplaceInto<T>(this SqliteWasmInterop interop,
                                        string intoTableName,

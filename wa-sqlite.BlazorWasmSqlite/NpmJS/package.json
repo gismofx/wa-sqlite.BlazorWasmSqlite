@@ -16,6 +16,7 @@
     "webpack-cli": "^4.6.0"
   },
   "dependencies": {
+    "@xmtp/wa-sqlite": "^1.0.1",
     "wa-sqlite": "^1.0.0",
     "webpack": "^5.91.0"
   },

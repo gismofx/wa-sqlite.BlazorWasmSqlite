@@ -81,6 +81,14 @@ namespace wa_sqlite.BlazorWasmSqlite
             public string Error { get; set; } = string.Empty;
         }
 
+        public class QueryResult<T>
+        {
+            public int Changes { get; set; } = 0;
+            public IEnumerable<T> Data { get; set; } = Enumerable.Empty<T>();
+            public List<List<string>> Columns { get; set; } = null!;
+            public string Error { get; set; } = string.Empty;
+        }
+
         /// <summary>
         /// Execute a query and return the quantity of changed rows
         /// </summary>
@@ -105,39 +113,40 @@ namespace wa_sqlite.BlazorWasmSqlite
 
         public async Task<IEnumerable<JsonNode>> Query(string query)
         {
-            return await QueryRaw<IEnumerable<JsonNode>>(query,null);
+            var result = await QueryRaw<JsonNode>(query);//,null);
+            return result.Data;
             //return await Query<JsonNode>(query);
         }
 
-        public async Task<IEnumerable<T>> Query<T>(string query, Dictionary<string,object> parameters)
+        public async Task<IEnumerable<T>> Query<T>(string query, Dictionary<string,object> parameters = null)
         {
             //var tState = State;
             //if (State == ConnectionState.Closed)
             //    await Open();
 
             var opt = new JsonSerializerOptions() { PropertyNameCaseInsensitive = true, };
-            var jsonResult = await QueryRaw(query, parameters);
-            var result = JsonSerializer.Deserialize<IEnumerable<T>>(jsonResult, opt);
+            var jsonResult = await QueryRaw<T>(query, parameters);
+            //var result = JsonSerializer.Deserialize<IEnumerable<T>>(jsonResult, opt);
 
             //if (tState == ConnectionState.Closed)
             //    await Close();
-            return result;
+            return jsonResult.Data;// result;
         }
 
-        public async Task<IEnumerable<T>> Query<T>(string query)
-        {
-            //var tState = State;
-            //if (State == ConnectionState.Closed)
-            //    await Open();
+        //public async Task<IEnumerable<T>> Query<T>(string query)
+        //{
+        //    //var tState = State;
+        //    //if (State == ConnectionState.Closed)
+        //    //    await Open();
             
-            var opt = new JsonSerializerOptions() { PropertyNameCaseInsensitive = true, };
-            var jsonResult = await QueryRaw(query);
-            var result = JsonSerializer.Deserialize<IEnumerable<T>>(jsonResult,opt);
+        //    var opt = new JsonSerializerOptions() { PropertyNameCaseInsensitive = true, };
+        //    var jsonResult = await QueryRaw(query);
+        //    var result = JsonSerializer.Deserialize<IEnumerable<T>>(jsonResult,opt);
             
-            //if (tState == ConnectionState.Closed)
-            //    await Close();
-            return result;
-        }
+        //    //if (tState == ConnectionState.Closed)
+        //    //    await Close();
+        //    return result;
+        //}
 
         public async ValueTask<T> QuerySingle<T>(string query)
         {
@@ -153,25 +162,26 @@ namespace wa_sqlite.BlazorWasmSqlite
         public async Task<T> ExecuteScalar<T>(string query)
         {
             var json = await QueryRaw<JsonElement>(query);
-            if (json.GetArrayLength() == 0) return default;
+            var first = json.Data.FirstOrDefault();
+            if (first.GetArrayLength() == 0) return default;
             //nothing was returned from the query
-            var d = json[0].Deserialize<Dictionary<string, T>>();
+            var d = first[0].Deserialize<Dictionary<string, T>>();
             return d.First().Value;
             //return default(T);
         }
 
-        public async Task<JsonNode> QueryRaw(string query, Dictionary<string, object> parameters = null)
+        public async Task<QueryResult<JsonNode>> QueryRaw(string query, Dictionary<string, object> parameters = null)
         {
             return await QueryRaw<JsonNode>(query, parameters);
         }
 
-        public async Task<T> QueryRaw<T>(string query, Dictionary<string, object> parameters = null)
+        public async Task<QueryResult<T>> QueryRaw<T>(string query, Dictionary<string, object> parameters = null)
         {
             var tState = State;
             if (State == ConnectionState.Closed)
                 await Open();
 
-            var jsonResult = await _JsRuntime.InvokeAsync<T>("sqlite.query", _CurrentDB, query, parameters);
+            var jsonResult = await _JsRuntime.InvokeAsync<QueryResult<T>>("sqlite.query", _CurrentDB, query, parameters);
             //var jsonResult = await _JsRuntime.InvokeAsync<T>("sqlite.query", _CurrentDB, query);
 
             if (tState == ConnectionState.Closed)
