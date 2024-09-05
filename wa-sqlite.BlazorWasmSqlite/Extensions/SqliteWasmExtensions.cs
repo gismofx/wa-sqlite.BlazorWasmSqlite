@@ -1,8 +1,10 @@
-﻿using System;
+﻿using Microsoft.Extensions.Options;
+using System;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 using System.Data;
 using System.Data.Common;
 using System.Linq;
@@ -23,72 +25,169 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
         private static readonly ConcurrentDictionary<RuntimeTypeHandle, string> GetQueries = new ConcurrentDictionary<RuntimeTypeHandle, string>();
         private static readonly ConcurrentDictionary<RuntimeTypeHandle, string> TypeTableName = new ConcurrentDictionary<RuntimeTypeHandle, string>();
 
+        public static async Task<T> FindById<T>(this SqliteWasmInterop interop, string id) where T : class
+        {
+            var tableName = GetTableName<T>();
+            var sql = $"SELECT * from {tableName} where Id = @id";
+            var sparams = new SqliteQueryParams("@id", id);
+            return await interop.QuerySingle<T>(sql, sparams);
+        }
 
+
+        public enum OrderDirection
+        {
+            Ascending,
+            Descending
+        }
+
+        public static async Task<(IEnumerable<T> records, int totalRecords)> FindPaginated<T>(this SqliteWasmInterop interop,
+                                                                                    int page,
+                                                                                    int maxRecordsPerPage,
+                                                                                    IEnumerable<string> orderByColumns,
+                                                                                    OrderDirection orderDirection = OrderDirection.Ascending,
+                                                                                    IEnumerable<string>? columnsToSearchOn = null,
+                                                                                    string? wildcardQuery = null, bool isExact = false)
+        {
+            var tableName = GetTableName(typeof(T));
+
+            int offset = (page - 1) * maxRecordsPerPage;
+
+
+            if (columnsToSearchOn is null) columnsToSearchOn = Enumerable.Empty<string>();
+
+            string where = string.Empty;
+            if (columnsToSearchOn.Count() == 1)
+            {
+                where = $"WHERE {columnsToSearchOn.First()} {(isExact ? " = " : "LIKE")} @query";
+            }
+            else
+            {
+                where = columnsToSearchOn.Any() ?
+                    $"WHERE CONCAT_WS('|',{string.Join(",", columnsToSearchOn)}) LIKE @query"
+                    : string.Empty;
+            }
+
+
+
+
+
+            var direction = orderDirection == OrderDirection.Ascending ? "ASC" : "DESC";
+
+            var orderByCols = string.Join(",", orderByColumns);
+
+            var sql = $"SELECT c.* from {tableName} AS c " +
+                "INNER JOIN (" +
+                $"SELECT id From {tableName} " +
+                $"{where} " +
+                $"ORDER BY {orderByCols} {direction} " +
+                "LIMIT @limit " +
+                "OFFSET @offset) " +
+                "as tmp USING (id) " +
+                $"ORDER BY {orderByCols} {direction} ";
+
+
+            var sqlCount = $"SELECT COUNT(1) FROM {tableName} {where}";
+
+
+            //ToDo: Add Query
+            //sql = "Select * From Client LIMIT @rows OFFSET @startRow ORDER BY OwnerLastName, Id";
+            var sparams = new SqliteQueryParams();
+            sparams.Add("@limit", maxRecordsPerPage);
+            sparams.Add("@offset", offset);
+
+            wildcardQuery = isExact ? wildcardQuery : $"%{wildcardQuery}%";
+            wildcardQuery = string.IsNullOrWhiteSpace(wildcardQuery) ? "%" : wildcardQuery;
+            
+            sparams.Add("@query", wildcardQuery);
+            //var dto = new PaginatedQueryResultDTO<Client>();
+            var records = await interop.Query<T>(sql, sparams);
+
+            //var sqlCount = "SELECT COUNT(1) from Client";
+            var total = await interop.ExecuteScalar<int>(sqlCount, sparams);
+            return (records,total);
+        }
+
+        public static async Task<int> Upsert<T>(this SqliteWasmInterop interop, T record, string tableName)
+        {
+            return await interop.Upsert<T>(new List<T>() { record }, tableName);
+        }
 
         public static async Task<int> Upsert<T>(this SqliteWasmInterop interop, IEnumerable<T> records, string tableName) //where T : IEnumerable<T>
         {
             //var type = GetTypeOrGenericType(typeof(T));
             var type = typeof(T);
             var columnProperties = GetAllColumns<T>();
-            var columns = columnProperties.Select(x => x.Name);
+            var columns = columnProperties.Select(x => x.Name);//.ToList(); //ToDo: remove ToList later
 
             var explicitKeyProperties = ExplicitKeyPropertiesCache(type);
             var keyProperties = KeyPropertiesCache(type);
             if (keyProperties.Count == 0 && explicitKeyProperties.Count == 0)
                 throw new ArgumentException("Entity must have at least one [Key] or [ExplicitKey] property");
 
+            keyProperties.AddRange(explicitKeyProperties);
+            //if (keyProperties.Count != 1) 
+                //throw new ArgumentException("Entity has more than one Key Attribute applied");
+
             //var sql = 
             //return await interop.ReplaceInto<T>(tableName, columns, records, null, null);//, transaction, commandTimeout);
 
-            return await interop.Upsert<T>(tableName, columns, records);
+            return await interop.Upsert<T>(tableName, columns,keyProperties.First().Name, records);
 
         }
 
-        private static async Task<int> Upsert<T>(this SqliteWasmInterop interop, string tableName, IEnumerable<string> columns, IEnumerable<T> entitiesToUpsert)
+        private static async Task<int> Upsert<T>(this SqliteWasmInterop interop, string tableName, IEnumerable<string> columns, string pkColumnName, IEnumerable<T> entitiesToUpsert)
         {
-            var valueSb = new StringBuilder();
-            var inserts = new List<string>();//list of each record's values in sql format in columm order
-            long i = 0;
-            var sqlParams = new Dictionary<string, object>();//Key-Value pairs of parameter and value for query
+            //todo: we need to check size limitation and number of parameters and chunk the upserts
+            //32766  defaul max parameters
+            //size can be increases
+            int maxParams = 32000;
+            //var paramCount = columns.Count() * entitiesToUpsert.Count();
+            //if (paramCount > maxParams)
+            //{
+            //    var chunkCount = paramCount % 32000;
+            //}
 
-            foreach (var entity in entitiesToUpsert)
+            int resultCount = 0;
+            foreach (var entityChunk in entitiesToUpsert.Chunk(maxParams / columns.Count()))
             {
-                var recordAsDict = JsonSerializer.Deserialize<Dictionary<string, object>>(JsonSerializer.Serialize(entity));
-                var valueList = new List<string>();
-                foreach (var column in columns)
+                var valueSb = new StringBuilder();
+                var inserts = new List<string>();//list of each record's values in sql format in columm order
+                long i = 0;
+                var sqlParams = new Dictionary<string, object>();//Key-Value pairs of parameter and value for query
+
+                foreach (var entity in entityChunk)
                 {
-                    var p = $"@p{i}";
-                    sqlParams.Add(p, recordAsDict![column]);// maybe needs @ symbol?
-                    //dynamicParams.Add(p, record[column]);
-                    valueList.Add(p);// $"@{p}");
-                    i++;
+                    var recordAsDict = JsonSerializer.Deserialize<Dictionary<string, object>>(JsonSerializer.Serialize(entity,options:interop._JsonSerializerOptions));
+                    var valueList = new List<string>();
+                    foreach (var column in columns)
+                    {
+                        var p = $"@p{i}";
+                        var value = recordAsDict![column]; //bool.TryParse((string)recordAsDict![column], out var b) ? b ? 1 : 0 : recordAsDict![column];
+                        sqlParams.Add(p, value);// maybe needs @ symbol?
+                        valueList.Add(p);// $"@{p}");
+                        i++;
+                    }
+                    valueSb.Append($"({string.Join(",", valueList)})");
+                    inserts.Add(valueSb.ToString());
+                    valueSb.Clear();
                 }
-                valueSb.Append("(");
-                valueSb.Append(string.Join(",", valueList));
-                valueSb.Append(")");
-                inserts.Add(valueSb.ToString());
-                valueSb.Clear();
-            }
 
-            var columnSet = new List<string>();
-            foreach (var column in columns)
-            {
-                columnSet.Add($"{column} = excluded.{column}");
-            }
+                var columnSet = new List<string>();
+                foreach (var column in columns.Where(x=>x!=pkColumnName))
+                {
+                    columnSet.Add($"{column} = excluded.{column}");
+                }
 
-            var onConflictDoUpdate = $"ON CONFLICT (Id) DO UPDATE SET {string.Join(',', columnSet)}";
+                var onConflictDoUpdate = $"ON CONFLICT ({pkColumnName}) DO UPDATE SET {string.Join(',', columnSet)}";
                 //e.g. "ON CONFLICT(name) DO UPDATE SET phonenumber=excluded.phonenumber;"
-            var cmd = $"INSERT INTO {tableName} ({String.Join(",", columns)}) VALUES {String.Join(",", inserts)} {onConflictDoUpdate}";
-            return await interop.Execute(cmd, sqlParams);
+                var cmd = $"INSERT INTO {tableName} ({String.Join(",", columns)}) VALUES {String.Join(",", inserts)} {onConflictDoUpdate}";
+                resultCount+= await interop.Execute(cmd, sqlParams);
+            }
+             return resultCount;
 
             //return await interop ReplaceInto(intoTableName, columns, inserts, sqlParams, transaction, commandTimeout);
         }
 
-
-        //public static async Task<int> ReplaceInto<T>(this SqliteWasmInterop interop, T record, string tableName)
-        //{
-        //    return await interop.Upsert(new List<T>() { record }, tableName);
-        //}
 
         /// <summary>
         /// Get the type. If the type is IEnumerable, get the containing type
@@ -115,45 +214,9 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             return type;
         }
 
-        //public static async Task<int> UpsertAsync<T>(this IDbConnection db,
-        //                                     IEnumerable<T> entitiesToUpsert,
-        //                                     int chunkSize = 1000,
-        //                                     IDbTransaction transaction = null,
-        //                                     int? commandTimeout = null)
-        //{
-        //    var type = typeof(T);
-        //    //var contribType = typeof(SqlMapperExtensions);
-        //    //var tableName = contribType.GetTableName(type);
-        //    var columnsProperties = GetAllColumns<T>();
-        //    var columns = columnsProperties.Select(x => x.Name);
 
-        //    var explicitKeyProperties = contribType.ExplicitKeyPropertiesCache(type);
-        //    var keyProperties = contribType.KeyPropertiesCache(type);
-        //    if (keyProperties.Count == 0 && explicitKeyProperties.Count == 0)
-        //        throw new ArgumentException("Entity must have at least one [Key] or [ExplicitKey] property");
-
-        //    var dbConnectionType = db.GetType().Name;
-        //    int result;
-        //    switch (dbConnectionType)
-        //    {
-        //        case "SqliteConnection":
-        //        case "SQLiteConnection":
-        //            result = await db.ReplaceInto<T>(tableName, columns, entitiesToUpsert, transaction, commandTimeout);
-        //            break;
-        //        case "MySqlConnection":
-        //            result = await db.MySQLUpsertAsync<T>(entitiesToUpsert, columns, tableName, chunkSize, transaction, commandTimeout);
-        //            break;
-        //        default:
-        //            throw new Exception($"No method found for database type: {dbConnectionType}");
-        //    }
-        //    return result;
-
-
-        //}
-
-        private static List<PropertyInfo> GetAllColumns<T>()
+        public static List<PropertyInfo> GetAllColumns(Type type)
         {
-            var type = typeof(T);
             //var contribType = typeof(SqlMapperExtensions);
 
             var allProperties = TypePropertiesCache(type);
@@ -161,6 +224,13 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             var keyProperties = KeyPropertiesCache(type);
             var allPropertiesExceptKeyAndComputed = allProperties.Except(keyProperties.Union(computedProperties)).ToList();
             return allPropertiesExceptKeyAndComputed;
+        }
+
+
+        public static List<PropertyInfo> GetAllColumns<T>()
+        {
+            var type = typeof(T);
+            return GetAllColumns(type);
         }
 
         private static List<PropertyInfo> ComputedPropertiesCache(Type type)
@@ -176,8 +246,39 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             return computedProperties;
         }
 
+        public static string GetTableName<T>() where T : class
+        {
+            return GetTableName(typeof(T));
+        }
 
-    
+        public static string GetTableName(Type type)
+        {
+            if (TypeTableName.TryGetValue(type.TypeHandle, out string name)) return name;
+
+            if (false) return "";
+            else
+            {
+                //NOTE: This as dynamic trick falls back to handle both our own Table-attribute as well as the one in EntityFramework 
+                var tableAttrName =
+                    type.GetCustomAttribute<TableAttribute>(false)?.Name
+                    ?? (type.GetCustomAttributes(false).FirstOrDefault(attr => attr.GetType().Name == "TableAttribute") as dynamic)?.Name;
+
+                if (tableAttrName != null)
+                {
+                    name = tableAttrName;
+                }
+                else
+                {
+                    name = type.Name + "s";
+                    if (type.IsInterface && name.StartsWith("I"))
+                        name = name.Substring(1);
+                }
+            }
+
+            TypeTableName[type.TypeHandle] = name;
+            return name;
+        }
+
 
         private static async Task<int> ReplaceInto<T>(this SqliteWasmInterop interop,
                                        string intoTableName,
@@ -226,40 +327,12 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             return await interop.Execute(cmd, parameters);// .ExecuteAsync(cmd, parameters, transaction, commandTimeout);
         }
 
-        //private static async Task<int> ReplaceInto<Tentity>(this IDbConnection db,
-        //                                                    string tableName,
-        //                                                    IEnumerable<string> columns,
-        //                                                    IEnumerable records,
-        //                                                    IDbTransaction transaction = null,
-        //                                                    int? commandTimeout = null)
-        //{
-        //    var valueSb = new StringBuilder();
-        //    var inserts = new List<string>();
-        //    var dynamicParams = new DynamicParameters();
-        //    long i = 0;
-
-        //    var type = GetTypeOrGenericType(typeof(Tentity));
-
-        //    foreach (var r in records)
-        //    {
-        //        var valueList = new List<string>();
-        //        foreach (var column in columns)
-        //        {
-        //            var value = type.GetProperty(column)?.GetValue(r, null);
-        //            var p = $"p{i}";
-        //            dynamicParams.Add(p, value);
-        //            valueList.Add($"@{p}");
-        //            i++;
-        //        }
-        //        valueSb.Append("(");
-        //        valueSb.Append(String.Join(",", valueList));
-        //        valueSb.Append(")");
-        //        inserts.Add(valueSb.ToString());
-        //        valueSb.Clear();
-        //    }
-        //    return await db.ReplaceInto(tableName, columns, inserts, dynamicParams, transaction, commandTimeout);
-        //}
-
+        public static async Task<int> DropTable(this SqliteWasmInterop interop, string tableName)
+        {
+            var resultDropSql = $"DROP TABLE IF EXISTS {tableName};";
+            var dropResult = await interop.Execute(resultDropSql);
+            return dropResult;
+        }
 
         private static List<PropertyInfo> ExplicitKeyPropertiesCache(Type type)
         {
@@ -282,7 +355,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             }
 
             var allProperties = TypePropertiesCache(type);
-            var keyProperties = allProperties.Where(p => p.GetCustomAttributes(true).Any(a => a is KeyAttribute)).ToList();
+            var keyProperties = allProperties.Where(p => p.GetCustomAttributes(true).Any(a => a.GetType().Name == "KeyAttribute")).ToList();
 
             if (keyProperties.Count == 0)
             {
@@ -314,8 +387,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             var attributes = pi.GetCustomAttributes(false).Where(x => x.GetType().Name == "WriteAttribute").ToList(); // typeof(WriteAttribute), false
             if (attributes.Count != 1) return true;
 
-            //var writeAttribute = (WriteAttribute)attributes[0];
-            var writeProp = attributes[0].GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public).Where(x => x.Name == "Write" && x.PropertyType is bool).First();
+            var writeProp = attributes[0].GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public).Where(x => x.PropertyType == typeof(bool)).First();
             var write = (bool)writeProp.GetValue(attributes[0]);
             return write;
         }

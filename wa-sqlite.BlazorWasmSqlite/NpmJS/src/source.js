@@ -39,24 +39,9 @@ window.sqlite = {
     },
 
     /*Execute a sql command
+    Not expecting a query for rows
     */
     execute: async function (dbConn, sql, parameters = null) {
-        
-        //let result = {changes: 0 ,response: null, data:"", error:""};
-        //try {
-        //    let response = await sqlite.sqlite3.exec(dbConn, query, (row, columns) => {
-        //        result.data = row[0];
-        //        console.log(columns);
-        //    });
-        //    result.response = response;
-        //    result.changes = sqlite.sqlite3.changes(dbConn);
-        //    return result;
-        //}
-        //catch (error) {
-        //    result.error = error.message
-        //    return result;
-        //}
-        //let result = { result: [] };
         let result = { changes: 0, response: null, data: "", error: "" };
 
         for await (const stmt of sqlite.sqlite3.statements(dbConn, sql)) {
@@ -69,18 +54,19 @@ window.sqlite = {
                     return result;
                 }
             }
-            console.log("Sql: " + sqlite.sqlite3.sql(stmt));
+            //console.log("Sql: " + sqlite.sqlite3.sql(stmt));
             //console.log("Sql: " + sqlite.sqlite3.expanded_sql(stmt));
             let columns;
             try {
                 while (await sqlite.sqlite3.step(stmt) === SQLite.SQLITE_ROW) {
-                    columns = columns ?? sqlite.sqlite3.column_names(stmt);
+                    //columns = columns ?? sqlite.sqlite3.column_names(stmt);
                     //const row = sqlite.sqlite3.row(stmt);
                     //let rowObj = resultToRow(columns, row);
                     //result.result.push(resultToRow(columns, row));
-                    result.response = response;
-                    result.changes = sqlite.sqlite3.changes(dbConn);
+                    
                 }
+                result.response = "SQLITE_DONE";
+                result.changes = sqlite.sqlite3.changes(dbConn);
             }
             catch (error) {
                 console.log(error.message);
@@ -134,38 +120,9 @@ window.sqlite = {
             result.error = error.message;
             return result;
         }
-        
-        
-
-        
 
         return result; // SQLite.SQLITE_OK;
     },
-    /*
-    queryold: async function (dbConn, query) {
-        let result2 = { result: [], error='' };
-        try {
-            let response = await sqlite.sqlite3.exec(dbConn, query, (row, columns) => {
-                let i = 0;
-                let tObj = {}; // new Object();
-                while (i < row.length) {
-                    tObj[columns[i]] = row[i];
-                    i++;
-                }
-                //let tObj = Object.assign()
-                result2.result.push(tObj);
-                //result.data.push(row);
-                //result.columns.push(columns);
-            });
-            console.log(JSON.stringify(result2));
-            return result2.result;
-        }
-        catch (error) {
-            console.error(error.message);
-        }
-
-    },
-    */
     //showPrompt: async function(message) {
     //    return prompt(message, 'Type anything here');
     //}
