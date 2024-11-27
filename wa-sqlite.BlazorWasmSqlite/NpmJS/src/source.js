@@ -69,7 +69,7 @@ window.sqlite = {
                 result.changes = sqlite.sqlite3.changes(dbConn);
             }
             catch (error) {
-                console.log(error.message);
+                console.error(error.message);
                 result.error = error.message
                 //    return result;
             }
@@ -110,13 +110,13 @@ window.sqlite = {
                 }
                 catch (error) {
                     result.error = error.message
-                    console.log("Query Error: " + error.message);
+                    console.error("Query Error: " + error.message);
                     //return null;
                 }
             }
         }
         catch (error) {
-            console.log("Query Error when preparing statements: " + error.message);
+            console.error("Query Error when preparing statements: " + error.message);
             result.error = error.message;
             return result;
         }

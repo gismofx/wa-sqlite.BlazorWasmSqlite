@@ -7,21 +7,30 @@ using System.Threading.Tasks;
 namespace wa_sqlite.BlazorWasmSqlite.Attributes
 {
     [AttributeUsage(AttributeTargets.Property, Inherited = false, AllowMultiple = false)]
-    public class SqliteTypeAttribute : Attribute
+    public class SqliteColumnAttribute : Attribute
     {
 
         public string ColumnType { get; set; }
-        public bool NotNull { get; set; }
+        public bool AllowNull { get; set; }
 
         public bool Unique { get; set; }
 
-        public SqliteTypeAttribute(string sqliteColumnType = "TEXT", bool notNull = false, bool unique = false)//SqliteType sqliteColumnType)
+        public bool CaseSensitive { get; set; }
+
+        public bool Index { get; set; }
+
+        public SqliteColumnAttribute(string sqliteColumnType = "",
+                                   bool allowNull = true,
+                                   bool unique = false,
+                                   bool caseSensitive = false,
+                                   bool index = false)//SqliteType sqliteColumnType)
         {
             ColumnType = sqliteColumnType;
-            NotNull = notNull;
+            AllowNull = allowNull;
             Unique = unique;
+            CaseSensitive = caseSensitive;
+            Index = index;
         }
-
 
     }
 

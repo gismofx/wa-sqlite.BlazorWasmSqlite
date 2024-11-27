@@ -1,8 +1,12 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace wa_sqlite.BlazorWasmSqlite;
+namespace wa_sqlite.BlazorWasmSqlite.JsonConverters;
 
+/// <summary>
+/// Sqlite does not like "boolean". C# boolean values must be converted to 0 or 1
+/// 1=true 0=false
+/// </summary>
 internal class BooleanConvertor : JsonConverter<bool>
 {
     public override bool Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
@@ -14,4 +18,5 @@ internal class BooleanConvertor : JsonConverter<bool>
     {
         writer.WriteNumberValue(value ? 1 : 0);
     }
+
 }

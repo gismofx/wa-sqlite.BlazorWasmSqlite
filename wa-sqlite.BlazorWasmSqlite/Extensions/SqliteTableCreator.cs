@@ -9,8 +9,19 @@ using System.Diagnostics.Tracing;
 
 namespace wa_sqlite.BlazorWasmSqlite.Extensions
 {
+    /// <summary>
+    /// Class helps create Sqlite tables based on a model class
+    /// </summary>
     public class SqliteTableCreator
     {
+        public TableCreatorOptions Options { get; init; }
+
+        public SqliteTableCreator(TableCreatorOptions options = null)
+        {
+            if (options == null) Options = new TableCreatorOptions();
+            else Options = options;
+        }
+
         /// <summary>
         /// Generate sqlite table created code
         /// Generate any index create code 
@@ -27,10 +38,8 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             var columnProps = new List<string>();
             foreach (var prop in props)
             {
-                var columnAtt = prop.GetCustomAttribute<SqliteTypeAttribute>() ?? new SqliteTypeAttribute(GetSqliteColumnFromType(prop.PropertyType));
-                var pk = prop.Name.Equals("Id", StringComparison.OrdinalIgnoreCase) ? "PRIMARY KEY" : string.Empty;
-                var sqlType = columnAtt.ColumnType;
-                columnProps.Add($"{prop.Name} {sqlType} {pk} {(columnAtt.Unique ? "UNIQUE" : "")} {(columnAtt.NotNull ? "NOT NULL" : "")}".Trim());
+                var colCreate = ColumnCreate(prop);
+                columnProps.Add(colCreate);
             }
             sb.Append(string.Join($",", columnProps));//\r\n
             sb.Append(");");
@@ -38,26 +47,47 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
 
             var creates = new List<string>();
             creates.Add(sb.ToString());
-
-
-
-
+            var indexes = GenerateColumnIndexes(props,tableName);
+            creates.AddRange(indexes);
             return creates;
 
         }
 
-        public static List<string> GenericColumnIndexes(List<PropertyInfo?> entityProperties, string tableName)
+        private static string ColumnCreate(PropertyInfo prop)
+        {
+            //Get the attribute or create a new one with defaults
+            var columnAtt = GetSqliteColumnAttributeOrDefault(prop);
+
+            //is is an 'Id'?  Then it's primary key
+            var pk = prop.Name.Equals("Id", StringComparison.OrdinalIgnoreCase) ? "PRIMARY KEY" : string.Empty;
+
+            //get it's type
+            var sqlType = columnAtt.ColumnType;
+            //if text and case insensitive COLLATE NOCASE
+            var collate = (sqlType == "TEXT" && columnAtt.CaseSensitive == false) ? "COLLATE NOCASE" : string.Empty;
+            
+            return $"{prop.Name} {sqlType} {collate} {pk} {(columnAtt.Unique ? "UNIQUE" : "")} {(columnAtt.AllowNull ? "" : "NOT NULL")}".Trim();
+        }
+
+        private static SqliteColumnAttribute GetSqliteColumnAttributeOrDefault(PropertyInfo prop)
+        {
+            var att = prop.GetCustomAttribute<SqliteColumnAttribute>() ?? new SqliteColumnAttribute(sqliteColumnType:GetSqliteColumnFromType(prop.PropertyType));
+            if (string.IsNullOrWhiteSpace(att.ColumnType)) att.ColumnType = GetSqliteColumnFromType(prop.PropertyType);
+            return att;
+        }
+
+        private static List<string> GenerateColumnIndexes(List<PropertyInfo?> entityProperties, string tableName)
         {
             var indexCommands = new List<string>(); 
-            var indexes = entityProperties.Where(x => x.GetCustomAttribute<SqliteIndexColumnAttribute>() != null);//.ToList();
+            var indexes = entityProperties.Where(x => x.GetCustomAttribute<SqliteColumnAttribute>() != null);//.ToList();
             
             if (!indexes.Any()) return indexCommands;
             
             foreach (var prop in indexes!)
             {
-                var att = prop.GetCustomAttribute<SqliteTypeAttribute>();
-                var indAdd = $"CREATE {(att.Unique ? "UNIQUE" : "")} INDEX IF NOT EXISTS ind_{prop.Name} on {tableName} ({prop.Name})";
-                indexCommands.Add(indAdd);
+                var att = prop.GetCustomAttribute<SqliteColumnAttribute>();
+                var indexCreate = att.Index ? $"CREATE {(att.Unique ? "UNIQUE" : "")} INDEX IF NOT EXISTS ind_{prop.Name}_{tableName} on {tableName} ({prop.Name})" : string.Empty;
+                indexCommands.Add(indexCreate);
             }
 
             return indexCommands;
@@ -74,11 +104,15 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
         {
             var type = typeof(T);
             return GenerateSqliteCreateTable(type);
-            //var check = type.IsAssignableTo(typeof(T));
-            //if (!check) throw new NotImplementedException($"ISyncableEntity not applied to {nameof(type)}");
         }
 
 
+        /// <summary>
+        /// Map a C# type to a sqlite type
+        /// </summary>
+        /// <param name="type"></param>
+        /// <returns></returns>
+        /// <exception cref="NotImplementedException"></exception>
         public static string GetSqliteColumnFromType(Type type)
         {
             var t = type.Name;
@@ -93,7 +127,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             {
                 case nameof(String):
                 case nameof(DateTime):
-                    return "TEXT";
+                    return "NUMERIC";//return "TEXT";
                 case nameof(UInt32): //unit
                 case nameof(UInt64): //ulong
                 case nameof(UInt128): //

@@ -10,8 +10,10 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading;
 using System.Threading.Tasks;
 using wa_sqlite.BlazorWasmSqlite.DBConnection;
+using wa_sqlite.BlazorWasmSqlite.JsonConverters;
 
 namespace wa_sqlite.BlazorWasmSqlite;
 
@@ -43,6 +45,10 @@ public class SqliteWasmInterop
 
         _JsonSerializerOptions = new JsonSerializerOptions();
         _JsonSerializerOptions.Converters.Add(new BooleanConvertor());
+        _JsonSerializerOptions.Converters.Add(new DateTimeConvertor());
+        _JsonSerializerOptions.Converters.Add(new DateTimeNullableConvertor());
+        _JsonSerializerOptions.Converters.Add(new StringConvertor());
+        //_JsonSerializerOptions.NumberHandling = 
         
     }
 
@@ -64,7 +70,7 @@ public class SqliteWasmInterop
     {
         //var module = await moduleTask.Value;
         State = ConnectionState.Connecting;
-        _CurrentDB = await _JsRuntime.InvokeAsync<int>("sqlite.open",DBName, Filename);
+        _CurrentDB = await _JsRuntime.InvokeAsync<int>("sqlite.open",DBName, Filename).ConfigureAwait(false);
         if (_CurrentDB.HasValue) State = ConnectionState.Open;
         else State = ConnectionState.Closed;
         return _CurrentDB;
@@ -87,16 +93,6 @@ public class SqliteWasmInterop
         public string Error { get; set; } = string.Empty;
     }
 
-    //public class QueryResult<T>
-    //{
-    //    public int Changes { get; set; } = 0;
-
-    //    public JsonDocument Data { get; set; } = null;
-
-    //    //public IEnumerable<T> Data { get; set; } = Enumerable.Empty<T>();
-    //    public List<List<string>> Columns { get; set; } = null!;
-    //    public string Error { get; set; } = string.Empty;
-    //}
 
     /// <summary>
     /// Execute a query and return the quantity of changed rows
@@ -133,13 +129,15 @@ public class SqliteWasmInterop
     public async Task<IEnumerable<T>> Query<T>(string query, IDictionary<string,object>? parameters = null)
     {
         var jsonResult = await QueryRaw(query, parameters);
+        if (!string.IsNullOrWhiteSpace(jsonResult.Error)) 
+            return Enumerable.Empty<T>();
         var result = JsonSerializer.Deserialize<IEnumerable<T>>(jsonResult.Data, _JsonSerializerOptions);
         return result;
     }
 
     public async ValueTask<T> QuerySingle<T>(string query, IDictionary<string, object>? parameters = null )
     {
-        return (await Query<T>(query,parameters)).First();
+        return (await Query<T>(query,parameters)).FirstOrDefault();
     }
 
     /// <summary>
@@ -151,6 +149,10 @@ public class SqliteWasmInterop
     public async Task<T> ExecuteScalar<T>(string query, IDictionary<string, object>? parameters = null)
     {
         var raw = await QueryRaw(query,parameters);
+        if (!string.IsNullOrWhiteSpace(raw.Error))
+        {
+            throw new Exception(raw.Error);
+        }
         //dynamic json;
         try
         {
@@ -176,27 +178,51 @@ public class SqliteWasmInterop
         //return default(T);
     }
 
-
+    private static object _lock = new object();
+    //private static SemaphoreSlim _semaphoreSlim = new SemaphoreSlim();
+    private readonly SemaphoreSlim _semaphore = new SemaphoreSlim(1, 1);
     public async Task<QueryResult> QueryRaw(string query, IDictionary<string, object>? parameters = null)
     {
-        var tState = State;
-        if (State == ConnectionState.Closed)
-            await Open();
+        //lock (_lock)//Todo: Chad Test lock
+        await _semaphore.WaitAsync();
         try
         {
-            //var jsonResult = await _JsRuntime.InvokeAsync<QueryResult<T>>("sqlite.query", _CurrentDB, query, parameters);
-            var queryResult = await _JsRuntime.InvokeAsync<QueryResult>("sqlite.query", _CurrentDB, query, parameters);
-            return queryResult;
-        }
-        catch (Exception ex)
-        {
-            throw new Exception($"Error in query/json in QueryRaw: {query}{Environment.NewLine}{ex.Message}", ex);
-        }
-        finally {
-            if (tState == ConnectionState.Closed)
-                await Close();
-        }
 
+        
+            var tState = State;
+            if (State == ConnectionState.Closed)
+            {
+                await Open();
+            }
+            if (State == ConnectionState.Connecting)
+            {
+                var nowPlus = DateTime.Now.AddSeconds(2);
+                while (DateTime.Now < nowPlus)
+                {
+                    if (State == ConnectionState.Open) break;
+                }
+                if (State != ConnectionState.Open) return new() { Changes = 0, Columns = new(), Error = "Connection not open", Data = JsonDocument.Parse("{}") };// throw new Exception("Connection Not Open");
+            }
+            try
+            {
+                //var jsonResult = await _JsRuntime.InvokeAsync<QueryResult<T>>("sqlite.query", _CurrentDB, query, parameters);
+                var queryResult = await _JsRuntime.InvokeAsync<QueryResult>("sqlite.query", _CurrentDB, query, parameters);
+                return queryResult;
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Error in query/json in QueryRaw: {query}{Environment.NewLine}{ex.Message}", ex);
+            }
+            finally
+            {
+                if (tState == ConnectionState.Closed)
+                    await Close();
+            }
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
 
     }
 
@@ -232,10 +258,20 @@ public class SqliteWasmInterop
     /// <returns></returns>
     public async Task<bool> TableExists(string tableName)
     {
-        var sql = $"SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = '{tableName}'";
+        var sql = $"SELECT count(1) FROM sqlite_master WHERE type = 'table' AND name = '{tableName}'";
+        var count = await ExecuteScalar<int>(sql);
+        var result = Convert.ToBoolean(count);
+        return result;
+    }
+
+    public async Task<bool> ViewExists(string viewName)
+    {
+        var sql = $"SELECT count(*) FROM sqlite_master WHERE type = 'view' AND name = '{viewName}'";
         var result = Convert.ToBoolean(await ExecuteScalar<int>(sql));
         return result;
     }
+
+
 
     /// <summary>
     /// Get the Table Create code for a given table

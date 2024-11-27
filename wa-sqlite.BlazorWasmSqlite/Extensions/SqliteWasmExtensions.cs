@@ -34,26 +34,29 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
         }
 
 
-        public enum OrderDirection
+        public enum SortOrderDirection
         {
             Ascending,
-            Descending
+            AscendingCI,
+            Descending,
+            DescendingCI,
         }
 
         public static async Task<(IEnumerable<T> records, int totalRecords)> FindPaginated<T>(this SqliteWasmInterop interop,
                                                                                     int page,
                                                                                     int maxRecordsPerPage,
                                                                                     IEnumerable<string> orderByColumns,
-                                                                                    OrderDirection orderDirection = OrderDirection.Ascending,
+                                                                                    SortOrderDirection orderDirection = SortOrderDirection.Ascending,
                                                                                     IEnumerable<string>? columnsToSearchOn = null,
-                                                                                    string? wildcardQuery = null, bool isExact = false)
+                                                                                    string? wildcardQuery = null,
+                                                                                    bool isExact = false)
         {
             var tableName = GetTableName(typeof(T));
 
             int offset = (page - 1) * maxRecordsPerPage;
 
 
-            if (columnsToSearchOn is null) columnsToSearchOn = Enumerable.Empty<string>();
+          if (columnsToSearchOn is null) columnsToSearchOn = Enumerable.Empty<string>();
 
             string where = string.Empty;
             if (columnsToSearchOn.Count() == 1)
@@ -71,7 +74,8 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
 
 
 
-            var direction = orderDirection == OrderDirection.Ascending ? "ASC" : "DESC";
+            var direction = orderDirection == SortOrderDirection.Ascending ? "ASC" : "DESC";
+
 
             var orderByCols = string.Join(",", orderByColumns);
 
@@ -333,6 +337,14 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             var dropResult = await interop.Execute(resultDropSql);
             return dropResult;
         }
+
+        public static async Task<int> DropView(this SqliteWasmInterop interop, string viewName)
+        {
+            var resultDropSql = $"DROP VIEW IF EXISTS {viewName};";
+            var dropResult = await interop.Execute(resultDropSql);
+            return dropResult;
+        }
+
 
         private static List<PropertyInfo> ExplicitKeyPropertiesCache(Type type)
         {

@@ -18,11 +18,11 @@ namespace wa_sqlite.BlazorWasmSqlite
         public int NumberOfColumns { get; set; }
 
         [JsonPropertyName("wr")]
-        [JsonConverter(typeof(BoolConverter))]
+        //[JsonConverter(typeof(BoolConverter))]
         public bool HasNoRowId { get; set; }
         
         [JsonPropertyName("strict")]
-        [JsonConverter(typeof(BoolConverter))]
+        //[JsonConverter(typeof(BoolConverter))]
         public bool IsStrict { get; set; }
 
         public override string ToString()

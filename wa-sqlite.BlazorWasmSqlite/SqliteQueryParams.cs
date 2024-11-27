@@ -1,5 +1,6 @@
 ﻿using System.Collections;
 using System.Diagnostics.CodeAnalysis;
+using System.Security.Cryptography.X509Certificates;
 
 namespace wa_sqlite.BlazorWasmSqlite;
 
@@ -29,6 +30,17 @@ public class SqliteQueryParams : IDictionary<string, object>
     public int Count => _params.Count;
 
     public bool IsReadOnly => false;
+
+    /// <summary>
+    /// Add a datetime and convert to unix epoch
+    /// </summary>
+    /// <param name="key"></param>
+    /// <param name="date"></param>
+    public void Add(string key, DateTime date)
+    {
+        long seconds = (long)date.Subtract(DateTime.UnixEpoch).TotalSeconds;
+        Add(key, seconds);//date.ToString("yyyy-MM-dd HH:mm:ss.fff"));
+    }
 
     public void Add(string key, object value)
     {
