@@ -187,8 +187,6 @@ public class SqliteWasmInterop
         await _semaphore.WaitAsync();
         try
         {
-
-        
             var tState = State;
             if (State == ConnectionState.Closed)
             {

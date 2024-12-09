@@ -42,6 +42,17 @@ public class SqliteQueryParams : IDictionary<string, object>
         Add(key, seconds);//date.ToString("yyyy-MM-dd HH:mm:ss.fff"));
     }
 
+    /// <summary>
+    /// Add boolean parameter and convert to an Int
+    /// Sqlite stores boolean values as 0 or 1
+    /// </summary>
+    /// <param name="key"></param>
+    /// <param name="boolean"></param>
+    public void Add(string key, bool boolean)
+    {
+        Add(key, Convert.ToInt32(boolean));
+    }
+
     public void Add(string key, object value)
     {
         switch (key[0])
