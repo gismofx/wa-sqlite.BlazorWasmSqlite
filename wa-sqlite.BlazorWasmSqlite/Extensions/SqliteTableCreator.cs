@@ -126,6 +126,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             switch (t)
             {
                 case nameof(String):
+                    return "TEXT";
                 case nameof(DateTime):
                     return "NUMERIC";//return "TEXT";
                 case nameof(UInt32): //unit
