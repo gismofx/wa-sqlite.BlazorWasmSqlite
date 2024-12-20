@@ -135,7 +135,7 @@ public class SqliteWasmInterop
         return result;
     }
 
-    public async ValueTask<T> QuerySingle<T>(string query, IDictionary<string, object>? parameters = null )
+    public async ValueTask<T> QuerySingle<T>(string query, IDictionary<string, object>? parameters = null ) where T:class
     {
         return (await Query<T>(query,parameters)).FirstOrDefault();
     }
@@ -146,7 +146,7 @@ public class SqliteWasmInterop
     /// <typeparam name="T"></typeparam>
     /// <param name="query"></param>
     /// <returns></returns>
-    public async Task<T> ExecuteScalar<T>(string query, IDictionary<string, object>? parameters = null)
+    public async Task<T> QueryScalar<T>(string query, IDictionary<string, object>? parameters = null)
     {
         var raw = await QueryRaw(query,parameters);
         if (!string.IsNullOrWhiteSpace(raw.Error))
@@ -257,7 +257,7 @@ public class SqliteWasmInterop
     public async Task<bool> TableExists(string tableName)
     {
         var sql = $"SELECT count(1) FROM sqlite_master WHERE type = 'table' AND name = '{tableName}'";
-        var count = await ExecuteScalar<int>(sql);
+        var count = await QueryScalar<int>(sql);
         var result = Convert.ToBoolean(count);
         return result;
     }
@@ -265,7 +265,7 @@ public class SqliteWasmInterop
     public async Task<bool> ViewExists(string viewName)
     {
         var sql = $"SELECT count(*) FROM sqlite_master WHERE type = 'view' AND name = '{viewName}'";
-        var result = Convert.ToBoolean(await ExecuteScalar<int>(sql));
+        var result = Convert.ToBoolean(await QueryScalar<int>(sql));
         return result;
     }
 
@@ -278,7 +278,7 @@ public class SqliteWasmInterop
     /// <returns></returns>
     public async Task<string> GetTableCreate(string tableName)
     {
-        return await ExecuteScalar<string>($"Select sql from sqlite_schema where name = '{tableName}';");
+        return await QueryScalar<string>($"Select sql from sqlite_schema where name = '{tableName}';");
     }
 
     #endregion

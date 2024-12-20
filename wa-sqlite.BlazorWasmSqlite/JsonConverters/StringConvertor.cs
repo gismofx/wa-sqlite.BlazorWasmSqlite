@@ -25,8 +25,9 @@ namespace wa_sqlite.BlazorWasmSqlite.JsonConverters
             {
                 return null;
             }
-                
-            throw new System.Text.Json.JsonException("Error parsing a Number type to a string");
+            
+            
+            throw new System.Text.Json.JsonException("Error parsing property or value to string. Maybe you're trying to parse a single value and not an object property. Maybe try 'QueryScalar' to qeury for a single value-type. e.g. int or string ");
         }
 
         public override void Write(Utf8JsonWriter writer, string value, JsonSerializerOptions options)

@@ -107,7 +107,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             var records = await interop.Query<T>(sql, sparams);
 
             //var sqlCount = "SELECT COUNT(1) from Client";
-            var total = await interop.ExecuteScalar<int>(sqlCount, sparams);
+            var total = await interop.QueryScalar<int>(sqlCount, sparams);
             return (records,total);
         }
 
