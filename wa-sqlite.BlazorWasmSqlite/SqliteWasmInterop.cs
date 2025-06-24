@@ -126,6 +126,13 @@ public class SqliteWasmInterop
         //return await Query<JsonNode>(query);
     }
 
+    /// <summary>
+    /// Standard query expecting to return rows from the database
+    /// </summary>
+    /// <typeparam name="T"></typeparam>
+    /// <param name="query"></param>
+    /// <param name="parameters"></param>
+    /// <returns></returns>
     public async Task<IEnumerable<T>> Query<T>(string query, IDictionary<string,object>? parameters = null)
     {
         var jsonResult = await QueryRaw(query, parameters);
@@ -135,6 +142,13 @@ public class SqliteWasmInterop
         return result;
     }
 
+    /// <summary>
+    /// Query when you're expecting a single row/object to be returned
+    /// </summary>
+    /// <typeparam name="T"></typeparam>
+    /// <param name="query"></param>
+    /// <param name="parameters"></param>
+    /// <returns></returns>
     public async ValueTask<T> QuerySingle<T>(string query, IDictionary<string, object>? parameters = null ) where T:class
     {
         return (await Query<T>(query,parameters)).FirstOrDefault();
@@ -177,6 +191,45 @@ public class SqliteWasmInterop
 
         //return default(T);
     }
+
+    public async Task<IEnumerable<T>> QueryScalars<T>(string query, IDictionary<string, object>? parameters = null)
+    {
+        var raw = await QueryRaw(query, parameters);
+        if (!string.IsNullOrWhiteSpace(raw.Error))
+        {
+            throw new Exception(raw.Error);
+        }
+        //dynamic json;
+        try
+        {
+            var values = new List<T>();
+            foreach (var tt in raw.Data.RootElement.EnumerateArray())
+            {
+                foreach (var ob in tt.EnumerateObject())
+                {
+                    values.Add(ob.Value.Deserialize<T>());
+                }
+                //var x = tt.Deserialize<T>();// Value.Deserialize<T>();
+                //return x;
+            }
+            return values;//default;
+            //var json = raw.Data.RootElement.EnumerateObject() //Deserialize<IEnumerable<KeyValuePair<string,T>>>();
+            //return json.First().Value;
+            //return json.First().Value;
+        }
+        catch (Exception ex)
+        {
+            return default;
+        }
+
+        //return default(T);
+    }
+
+
+    //public async Task<T> QueryRaw<T>(string query, IDictionary<string, object>? parameters = null)
+    //{
+
+    //}
 
     private static object _lock = new object();
     //private static SemaphoreSlim _semaphoreSlim = new SemaphoreSlim();
@@ -278,7 +331,7 @@ public class SqliteWasmInterop
     /// <returns></returns>
     public async Task<string> GetTableCreate(string tableName)
     {
-        return await QueryScalar<string>($"Select sql from sqlite_schema where name = '{tableName}';");
+        return await QueryScalar<string>($"Select sql from sqlite_schema where name = '{tableName}' COLLATE NOCASE;"); //collate nocase to allow search for table case-insensitive
     }
 
     #endregion

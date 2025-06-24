@@ -16,10 +16,10 @@ public class SqliteQueryParams : IDictionary<string, object>
 
     }
 
-    public SqliteQueryParams(string key, object value)
-    {
-        Add(key, value);
-    }
+    //public SqliteQueryParams()
+    //{
+    //    Add(key, value);
+    //}
 
     public object this[string key] { get => _params[key]; set => _params[key] = value; }
 

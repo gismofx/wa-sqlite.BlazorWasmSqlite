@@ -29,7 +29,8 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
         {
             var tableName = GetTableName<T>();
             var sql = $"SELECT * from {tableName} where Id = @id";
-            var sparams = new SqliteQueryParams("@id", id);
+            var sparams = new SqliteQueryParams();
+            sparams.Add("@id", id);
             return await interop.QuerySingle<T>(sql, sparams);
         }
 
@@ -49,7 +50,9 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
                                                                                     SortOrderDirection orderDirection = SortOrderDirection.Ascending,
                                                                                     IEnumerable<string>? columnsToSearchOn = null,
                                                                                     string? wildcardQuery = null,
-                                                                                    bool isExact = false)
+                                                                                    bool isExact = false,
+                                                                                    string otherParameterizedWhere = null,
+                                                                                    SqliteQueryParams otherParameters = null)
         {
             var tableName = GetTableName(typeof(T));
 
@@ -70,7 +73,10 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
                     : string.Empty;
             }
 
-
+            if (!string.IsNullOrWhiteSpace(otherParameterizedWhere))
+            {
+                where = $"{where} {otherParameterizedWhere}";
+            }
 
 
 
@@ -98,6 +104,10 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             var sparams = new SqliteQueryParams();
             sparams.Add("@limit", maxRecordsPerPage);
             sparams.Add("@offset", offset);
+            foreach(var para in otherParameters??new SqliteQueryParams())
+            {
+                sparams.Add(para.Key, para.Value);
+            }
 
             wildcardQuery = isExact ? wildcardQuery : $"%{wildcardQuery}%";
             wildcardQuery = string.IsNullOrWhiteSpace(wildcardQuery) ? "%" : wildcardQuery;
@@ -152,42 +162,58 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             //}
 
             int resultCount = 0;
-            foreach (var entityChunk in entitiesToUpsert.Chunk(maxParams / columns.Count()))
+            try
             {
-                var valueSb = new StringBuilder();
-                var inserts = new List<string>();//list of each record's values in sql format in columm order
-                long i = 0;
-                var sqlParams = new Dictionary<string, object>();//Key-Value pairs of parameter and value for query
-
-                foreach (var entity in entityChunk)
+                //await interop.Open();
+                //await interop.Execute("BEGIN TRANSACTION");
+                foreach (var entityChunk in entitiesToUpsert.Chunk(maxParams / columns.Count()))
                 {
-                    var recordAsDict = JsonSerializer.Deserialize<Dictionary<string, object>>(JsonSerializer.Serialize(entity,options:interop._JsonSerializerOptions));
-                    var valueList = new List<string>();
-                    foreach (var column in columns)
+                    var valueSb = new StringBuilder();
+                    var inserts = new List<string>();//list of each record's values in sql format in columm order
+                    long i = 0;
+                    var sqlParams = new Dictionary<string, object>();//Key-Value pairs of parameter and value for query
+
+                    foreach (var entity in entityChunk)
                     {
-                        var p = $"@p{i}";
-                        var value = recordAsDict![column]; //bool.TryParse((string)recordAsDict![column], out var b) ? b ? 1 : 0 : recordAsDict![column];
-                        sqlParams.Add(p, value);// maybe needs @ symbol?
-                        valueList.Add(p);// $"@{p}");
-                        i++;
+                        var recordAsDict = JsonSerializer.Deserialize<Dictionary<string, object>>(JsonSerializer.Serialize(entity, options: interop._JsonSerializerOptions));
+                        var valueList = new List<string>();
+                        foreach (var column in columns)
+                        {
+                            var p = $"@p{i}";
+                            var value = recordAsDict![column]; //bool.TryParse((string)recordAsDict![column], out var b) ? b ? 1 : 0 : recordAsDict![column];
+                            sqlParams.Add(p, value);// maybe needs @ symbol?
+                            valueList.Add(p);// $"@{p}");
+                            i++;
+                        }
+                        valueSb.Append($"({string.Join(",", valueList)})");
+                        inserts.Add(valueSb.ToString());
+                        valueSb.Clear();
                     }
-                    valueSb.Append($"({string.Join(",", valueList)})");
-                    inserts.Add(valueSb.ToString());
-                    valueSb.Clear();
-                }
 
-                var columnSet = new List<string>();
-                foreach (var column in columns.Where(x=>x!=pkColumnName))
-                {
-                    columnSet.Add($"{column} = excluded.{column}");
-                }
+                    var columnSet = new List<string>();
+                    foreach (var column in columns.Where(x => x != pkColumnName))
+                    {
+                        columnSet.Add($"{column} = excluded.{column}");
+                    }
 
-                var onConflictDoUpdate = $"ON CONFLICT ({pkColumnName}) DO UPDATE SET {string.Join(',', columnSet)}";
-                //e.g. "ON CONFLICT(name) DO UPDATE SET phonenumber=excluded.phonenumber;"
-                var cmd = $"INSERT INTO {tableName} ({String.Join(",", columns)}) VALUES {String.Join(",", inserts)} {onConflictDoUpdate}";
-                resultCount+= await interop.Execute(cmd, sqlParams);
+                    var onConflictDoUpdate = $"ON CONFLICT ({pkColumnName}) DO UPDATE SET {string.Join(',', columnSet)}";
+                    //e.g. "ON CONFLICT(name) DO UPDATE SET phonenumber=excluded.phonenumber;"
+                    var cmd = $"INSERT INTO {tableName} ({String.Join(",", columns)}) VALUES {String.Join(",", inserts)} {onConflictDoUpdate}";
+                    resultCount += await interop.Execute(cmd, sqlParams);
+                }
+                //await interop.Execute("COMMIT");
+
             }
-             return resultCount;
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error Upserting to {tableName}: {ex.Message}");
+                //await interop.Execute("ROLLBACK");
+            }
+            finally
+            {
+                //await interop.Close();
+            }
+            return resultCount;
 
             //return await interop ReplaceInto(intoTableName, columns, inserts, sqlParams, transaction, commandTimeout);
         }
@@ -397,11 +423,21 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
         private static bool IsWriteable(PropertyInfo pi)
         {
             var attributes = pi.GetCustomAttributes(false).Where(x => x.GetType().Name == "WriteAttribute").ToList(); // typeof(WriteAttribute), false
-            if (attributes.Count != 1) return true;
+            if (attributes.Any())
+            {
+                var writeProp = attributes[0].GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public).Where(x => x.PropertyType == typeof(bool)).First();
+                var write = (bool)writeProp.GetValue(attributes[0]);
+                return write;
+            }
+            
+            if (pi.CanWrite && pi.GetSetMethod(true).IsPublic)
+            {
+                return true;
+                // The setter exists and is public.
+            }
 
-            var writeProp = attributes[0].GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public).Where(x => x.PropertyType == typeof(bool)).First();
-            var write = (bool)writeProp.GetValue(attributes[0]);
-            return write;
+            return false;
+
         }
     }
 
