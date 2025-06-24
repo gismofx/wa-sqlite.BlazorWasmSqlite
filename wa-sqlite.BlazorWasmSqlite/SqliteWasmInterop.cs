@@ -48,6 +48,7 @@ public class SqliteWasmInterop
         _JsonSerializerOptions.Converters.Add(new DateTimeConvertor());
         _JsonSerializerOptions.Converters.Add(new DateTimeNullableConvertor());
         _JsonSerializerOptions.Converters.Add(new StringConvertor());
+        _JsonSerializerOptions.PropertyNameCaseInsensitive=true; //should be
         //_JsonSerializerOptions.NumberHandling = 
         
     }
@@ -106,7 +107,7 @@ public class SqliteWasmInterop
             await Open();
 
         //var paramJson = JsonSerializer.Serialize(parameters,_JsonSerializerOptions);
-
+        //var bytes = Encoding.UTF8.GetBytes(query);
         var result = await _JsRuntime.InvokeAsync<QueryResult>("sqlite.execute", _CurrentDB, query, parameters);// paramJson);// parameters);
         
         if (tState == ConnectionState.Closed)
