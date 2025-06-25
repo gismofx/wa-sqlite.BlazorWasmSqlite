@@ -41,7 +41,15 @@ window.sqlite = {
     /*Execute a sql command
     Not expecting a query for rows
     */
-    execute: async function (dbConn, sql, parameters = null) {
+   //execute: async function (dbConn, sql, parameters = null) {
+    execute: async function (bytes) {
+         
+        let utf8decoder = new TextDecoder();
+        let str = utf8decoder.decode(bytes);
+        const dto = JSON.parse(str);
+        const dbConn = dto.DbConnection;
+        const sql = dto.Query;
+        const parameters = dto.Parameters;
         let result = { changes: 0, response: null, data: "", error: "" };
 
         for await (const stmt of sqlite.sqlite3.statements(dbConn, sql)) {

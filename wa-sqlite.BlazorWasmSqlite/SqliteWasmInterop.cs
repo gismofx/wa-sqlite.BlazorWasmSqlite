@@ -106,10 +106,22 @@ public class SqliteWasmInterop
         if (State == ConnectionState.Closed)
             await Open();
 
+        
+        var dto = new ExecuteDTO()
+        {
+            DbConnection = _CurrentDB,
+            Query = query,
+            Parameters = parameters
+        };
+
+        var paramJsonAsByteArray = JsonSerializer.SerializeToUtf8Bytes(dto, _JsonSerializerOptions);
+
         //var paramJson = JsonSerializer.Serialize(parameters,_JsonSerializerOptions);
         //var bytes = Encoding.UTF8.GetBytes(query);
-        var result = await _JsRuntime.InvokeAsync<QueryResult>("sqlite.execute", _CurrentDB, query, parameters);// paramJson);// parameters);
-        
+
+        //var result = await _JsRuntime.InvokeAsync<QueryResult>("sqlite.execute", _CurrentDB, query, parameters);// paramJson);// parameters);
+        var result = await _JsRuntime.InvokeAsync<QueryResult>("sqlite.execute",paramJsonAsByteArray);
+
         if (tState == ConnectionState.Closed)
             await Close();
         //return result;
@@ -117,6 +129,12 @@ public class SqliteWasmInterop
         return result.Changes;
     }
 
+    private class ExecuteDTO()
+    {
+        public int? DbConnection { get; init; }
+        public string Query { get; init; }
+        public IDictionary<string, object>? Parameters { get; set; }
+    }
 
 
     public async Task<JsonDocument> Query(string query, IDictionary<string, object>? parameters = null)
