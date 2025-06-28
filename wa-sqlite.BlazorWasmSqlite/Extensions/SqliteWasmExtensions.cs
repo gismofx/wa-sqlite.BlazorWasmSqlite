@@ -111,7 +111,8 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
 
             wildcardQuery = isExact ? wildcardQuery : $"%{wildcardQuery}%";
             wildcardQuery = string.IsNullOrWhiteSpace(wildcardQuery) ? "%" : wildcardQuery;
-            
+            wildcardQuery = wildcardQuery.Replace("'", @"\'");//escape singlequote
+            wildcardQuery = wildcardQuery.Replace("\"", "\\\"");
             sparams.Add("@query", wildcardQuery);
             //var dto = new PaginatedQueryResultDTO<Client>();
             var records = await interop.Query<T>(sql, sparams);
