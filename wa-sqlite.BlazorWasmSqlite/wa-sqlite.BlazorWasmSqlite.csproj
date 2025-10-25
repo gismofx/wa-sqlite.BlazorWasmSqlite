@@ -16,8 +16,7 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="8.0.11" />
   </ItemGroup>
 	
-	
-		<PropertyGroup Condition="'$(Configuration)' == 'Debug|AnyCPU'">
+	<PropertyGroup Condition="'$(Configuration)' == 'Debug|AnyCPU'">
 		<NpmConfiguration>dev</NpmConfiguration>
 	</PropertyGroup>
 

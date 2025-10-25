@@ -93,7 +93,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
                 "LIMIT @limit " +
                 "OFFSET @offset) " +
                 "as tmp USING (id) " +
-                $"ORDER BY {orderByCols} {direction} ";
+                $"ORDER BY {orderByCols} {direction}";
 
 
             var sqlCount = $"SELECT COUNT(1) FROM {tableName} {where}";
@@ -111,8 +111,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
 
             wildcardQuery = isExact ? wildcardQuery : $"%{wildcardQuery}%";
             wildcardQuery = string.IsNullOrWhiteSpace(wildcardQuery) ? "%" : wildcardQuery;
-            wildcardQuery = wildcardQuery.Replace("'", @"\'");//escape singlequote
-            wildcardQuery = wildcardQuery.Replace("\"", "\\\"");
+            wildcardQuery = wildcardQuery.Replace("'", "'");// @"\u0027");//escape singlequote - not needed becuase it's parameterized.
             sparams.Add("@query", wildcardQuery);
             //var dto = new PaginatedQueryResultDTO<Client>();
             var records = await interop.Query<T>(sql, sparams);

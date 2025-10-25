@@ -8,6 +8,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Dynamic;
 using System.Linq;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
@@ -49,6 +50,7 @@ public class SqliteWasmInterop
         _JsonSerializerOptions.Converters.Add(new DateTimeNullableConvertor());
         _JsonSerializerOptions.Converters.Add(new StringConvertor());
         _JsonSerializerOptions.PropertyNameCaseInsensitive=true; //should be
+        _JsonSerializerOptions.Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping;
         //_JsonSerializerOptions.NumberHandling = 
         
     }
