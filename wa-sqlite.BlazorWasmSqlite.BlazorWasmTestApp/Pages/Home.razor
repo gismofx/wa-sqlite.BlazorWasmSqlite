@@ -81,7 +81,7 @@
     {
         if (string.IsNullOrWhiteSpace(Query)) return;
 
-        var result = await sqlite.Query(Query);
+        var result = await sqlite.Query<System.Text.Json.Nodes.JsonNode>(Query);
         QueryResult = ToJsonString(result);
 
     }
@@ -129,16 +129,7 @@
 
     }
 
-    public class model
-    {
-        [ExplicitKey]
-        public int Id { get; set; }
-        public string FirstName { get; set; }
-        public string LastName { get; set; }
-        public string Email { get; set; }
-        public long EpochTimeSeconds { get; set; }
-
-    }
+    
 
     private async Task UpsertClick()
     {

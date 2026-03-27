@@ -16,18 +16,14 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="8.0.11" />
   </ItemGroup>
 	
-	<PropertyGroup Condition="'$(Configuration)' == 'Debug|AnyCPU'">
-		<NpmConfiguration>dev</NpmConfiguration>
+	<PropertyGroup>
+		<NpmScript Condition="'$(Configuration)' == 'Release'">prod</NpmScript>
+		<NpmScript Condition="'$(Configuration)' != 'Release'">dev</NpmScript>
 	</PropertyGroup>
-
-	<PropertyGroup Condition="'$(Configuration)' == 'Release|AnyCPU'">
-		<NpmConfiguration>prod</NpmConfiguration>
-	</PropertyGroup>
-	<!--$(NpmConfiguration)-->
 
 	<Target Name="InstallAndRunNpm" BeforeTargets="PreBuildEvent">
 		<Exec Command="npm install" WorkingDirectory="NpmJS" />
-		<Exec Command="npm run-script prod" WorkingDirectory="NpmJS" />
+		<Exec Command="npm run-script $(NpmScript)" WorkingDirectory="NpmJS" />
 	</Target>
 	
 

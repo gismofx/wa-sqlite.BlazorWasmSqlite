@@ -1,168 +1,99 @@
-require('@xmtp/wa-sqlite');
-import SQLiteAsyncESMFactory from 'wa-sqlite/dist/wa-sqlite-async.mjs';
-import * as SQLite from 'wa-sqlite';
-import { IDBBatchAtomicVFS } from 'wa-sqlite/src/examples/IDBBatchAtomicVFS'; //' ./wa-sqlite/src/examples/IndexedDbVFS.js'
+/**
+ * sqlite.js — Main-thread bridge.
+ * Proxies all window.sqlite.* calls to a Web Worker via postMessage.
+ * The Worker owns the wa-sqlite instance and IndexedDB VFS.
+ *
+ * Contract: every window.sqlite method signature stays identical
+ * to the original so SqliteWasmInterop.cs needs zero changes.
+ */
 
+let worker = null;
+let nextId = 0;
+const pending = new Map(); // id → { resolve, reject }
+let workerReady = null;    // Promise that resolves when Worker posts 'ready'
 
+/**
+ * Spawn the Worker (once). Returns a Promise that resolves when
+ * the Worker signals it has loaded successfully.
+ */
+function ensureWorker() {
+    if (workerReady) return workerReady;
+
+    workerReady = new Promise((resolve, reject) => {
+        try {
+            // Resolve Worker URL relative to this script's location
+            // (Blazor serves RCL assets from _content/{PackageName}/)
+            const scriptEl = document.currentScript || document.querySelector('script[src*="sqlite.min.js"]');
+            const baseUrl = scriptEl.src.replace(/\/[^/]+$/, '/');
+            worker = new Worker(baseUrl + 'sqlite-worker.js', { name: 'sqlite-worker' });
+        } catch (err) {
+            reject(err);
+            return;
+        }
+
+        worker.onmessage = function (e) {
+            const msg = e.data;
+
+            // Worker startup signal
+            if (msg.type === 'ready') {
+                resolve();
+                return;
+            }
+
+            // Correlated response
+            const entry = pending.get(msg.id);
+            if (!entry) return;
+            pending.delete(msg.id);
+
+            if (msg.error) {
+                entry.reject(new Error(msg.error));
+            } else {
+                entry.resolve(msg.result);
+            }
+        };
+
+        worker.onerror = function (err) {
+            reject(err);
+        };
+    });
+
+    return workerReady;
+}
+
+/**
+ * Send a command to the Worker and return a Promise for the result.
+ */
+function invoke(method, ...args) {
+    const id = nextId++;
+    return new Promise((resolve, reject) => {
+        pending.set(id, { resolve, reject });
+        worker.postMessage({ id, method, args });
+    });
+}
+
+/**
+ * Public API — identical signatures to the original window.sqlite.*
+ * so SqliteWasmInterop.cs requires zero changes.
+ */
 window.sqlite = {
-    sqlite3: null,
-    dotNetRef: null,
-    test: function () {
-        console.log("Junk");
-        hello();
+    initDatabase: async function () {
+        await ensureWorker();
     },
 
-    /*
-    Open the database
-
-    */
     open: async function (dbName, fileName) {
-        const asyncModule = await SQLiteAsyncESMFactory();
-        const sqlite3 = SQLite.Factory(asyncModule);
-        sqlite3.vfs_register(
-            new IDBBatchAtomicVFS(fileName));//, { durability: "relaxed" })
-        //);
-        const connection = await sqlite3.open_v2(
-            dbName,
-            SQLite.SQLITE_OPEN_CREATE |
-            SQLite.SQLITE_OPEN_READWRITE |
-            SQLite.SQLITE_OPEN_URI,
-            fileName
-        );
-        sqlite.sqlite3 = sqlite3;//store it
-        return connection;
-       // return await open2();
+        await ensureWorker();
+        return await invoke('open', dbName, fileName);
     },
 
     close: async function (dbConnectionNumber) {
-        return await sqlite.sqlite3.close(dbConnectionNumber);
+        return await invoke('close');
     },
 
-    /*Execute a sql command
-    Not expecting a query for rows
-    */
-    execute: async function (dbConn, sql, parameters = null) {
-        let result = { changes: 0, response: null, data: "", error: "" };
-
-        for await (const stmt of sqlite.sqlite3.statements(dbConn, sql)) {
-
-            if (parameters != null) {
-                let bindresult = await sqlite.sqlite3.bind_collection(stmt, parameters);
-                if (bindresult != SQLite.SQLITE_OK) {
-                    console.error("unable to prepare");
-                    result.error = "Unable to Prepare statement. Check your syntax or parameters";
-                    return result;
-                }
-            }
-            //console.log("Sql: " + sqlite.sqlite3.sql(stmt));
-            //console.log("Sql: " + sqlite.sqlite3.expanded_sql(stmt));
-            let columns;
-            try {
-                while (await sqlite.sqlite3.step(stmt) === SQLite.SQLITE_ROW) {
-                    //columns = columns ?? sqlite.sqlite3.column_names(stmt);
-                    //const row = sqlite.sqlite3.row(stmt);
-                    //let rowObj = resultToRow(columns, row);
-                    //result.result.push(resultToRow(columns, row));
-                    
-                }
-                result.response = "SQLITE_DONE";
-                result.changes = sqlite.sqlite3.changes(dbConn);
-            }
-            catch (error) {
-                console.error(error.message);
-                result.error = error.message
-                //    return result;
-            }
-        }
-        return result;
-
+    execute: async function (dbConn, sql, parameters) {
+        return await invoke('execute', dbConn, sql, parameters || null);
     },
 
-
-
-    /*
-    Execute a query.
-    If you have a parameterized statement, you can send a collection of parameters
-    dbConn:int -  The open db connection
-    sql:string - The sql statement(parameterized or not)
-    parameters:dictionary/object - contains the parameters you for your sql statement
-    */
-    query: async function (dbConn, sql, parameters = null) {
-        let result = { data: [], error: "" };
-        try {
-            for await (const stmt of sqlite.sqlite3.statements(dbConn, sql)) {
-                if (parameters != null) {
-                    let bindresult = await sqlite.sqlite3.bind_collection(stmt, parameters);
-                    if (bindresult != SQLite.SQLITE_OK) {
-                        console.error("unable to prepare");
-                        return null;
-                    }
-                }
-                //Execute the statement(s)
-                try {
-                    let columns;
-                    while (await sqlite.sqlite3.step(stmt) === SQLite.SQLITE_ROW) {
-                        columns = columns ?? sqlite.sqlite3.column_names(stmt);
-                        const row = sqlite.sqlite3.row(stmt);
-                        //let rowObj = resultToRow(columns, row);
-                        result.data.push(resultToRow(columns, row));
-                    }
-                }
-                catch (error) {
-                    result.error = error.message
-                    console.error("Query Error: " + error.message);
-                    //return null;
-                }
-            }
-        }
-        catch (error) {
-            console.error("Query Error when preparing statements: " + error.message);
-            result.error = error.message;
-            return result;
-        }
-
-        return result; // SQLite.SQLITE_OK;
+    query: async function (dbConn, sql, parameters) {
+        return await invoke('query', dbConn, sql, parameters || null);
     },
-    //showPrompt: async function(message) {
-    //    return prompt(message, 'Type anything here');
-    //}
-}
-
-//Helper Function to convert the query result to a object with properties that can we sent back to .Net as JSON and deserialized into a c# object
-function resultToRow(columns, rowData) {
-    let i = 0;
-    let tObj = {}; // new Object();
-    while (i < rowData.length) {
-        tObj[columns[i]] = rowData[i];
-        i++;
-    }
-    return tObj;
-}
-
-async function hello() {
-    return await open2();
-    //const module = await SQLiteAsyncESMFactory();
-    //const sqlite3 = SQLite.Factory(module);
-    //const db = await sqlite3.open_v2('myDB', 0x06);
-    //await sqlite3.exec(db, `SELECT 'Hello, world!'`, (row, columns) => {
-    //    console.log(row);
-    //});
-    //await sqlite3.close(db);
-}
-
-
-async function open2() {
-    const asyncModule = await SQLiteAsyncESMFactory();
-    const sqlite3 = SQLite.Factory(asyncModule);
-    sqlite3.vfs_register(
-        new IDBBatchAtomicVFS("dbName"));//, { durability: "relaxed" })
-    //);
-    const connection = await sqlite3.open_v2(
-        "myAppName",
-        SQLite.SQLITE_OPEN_CREATE |
-        SQLite.SQLITE_OPEN_READWRITE |
-        SQLite.SQLITE_OPEN_URI,
-        "dbName"
-    );
-    return connection;
-}
+};
