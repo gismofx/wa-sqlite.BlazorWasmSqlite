@@ -88,6 +88,31 @@ const handlers = {
         }
         return result;
     },
+
+    async executeBatch(args) {
+        const [dbConn, batch] = args;
+        let totalChanges = 0;
+        const errors = [];
+        for (let i = 0; i < batch.length; i++) {
+            const { sql, params } = batch[i];
+            try {
+                for await (const stmt of sqlite3.statements(dbConn, sql)) {
+                    if (params != null) {
+                        const bindResult = await sqlite3.bind_collection(stmt, params);
+                        if (bindResult !== SQLite.SQLITE_OK) {
+                            errors.push({ index: i, error: 'Unable to prepare statement' });
+                            continue;
+                        }
+                    }
+                    while (await sqlite3.step(stmt) === SQLite.SQLITE_ROW) {}
+                    totalChanges += sqlite3.changes(dbConn);
+                }
+            } catch (error) {
+                errors.push({ index: i, error: error.message });
+            }
+        }
+        return { totalChanges, errors };
+    },
 };
 
 self.onerror = function (e) {

@@ -3,6 +3,9 @@
 @inject SqliteWasmInterop sqlite;
 @using wa_sqlite.BlazorWasmSqlite.Attributes
 @using wa_sqlite.BlazorWasmSqlite.Extensions
+@using System.Runtime.InteropServices.JavaScript
+@using wa_sqlite.BlazorWasmSqlite.DBConnection
+@using Dapper
 
 <PageTitle>Home</PageTitle>
 <MudContainer Gutters=true>
@@ -14,6 +17,8 @@
                 <MudButton Variant="Variant.Filled" OnClick="@(async ()=> await OpenClick())">Open</MudButton>
                 <MudButton Variant="Variant.Filled" OnClick="@(async ()=> await InsertTableAndData())">Add Sample Data</MudButton>
                 <MudButton Variant="Variant.Filled" OnClick="@(async ()=> await UpsertClick())">Upsert Test</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="@(async ()=> await JsImportTestClick())">JSImport Test</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Secondary" OnClick="@(async ()=> await DapperTestClick())">Dapper Test</MudButton>
             </MudStack>
             </MudPaper>
     </MudItem>
@@ -161,6 +166,93 @@
         var tableName = "Contacts";
 
         var what = await sqlite.Upsert<model>(models, tableName);
+    }
+
+    private async Task JsImportTestClick()
+    {
+        try
+        {
+            // 1. Open via JSImport
+            var dbConn = await SqliteJsInterop.OpenAsync("MyApp", "MyFile");
+            QueryResult = $"[JSImport] Opened: conn={dbConn}\n";
+
+            // 2. Create table
+            var execResult = await SqliteJsInterop.ExecuteAsync(dbConn,
+                "CREATE TABLE IF NOT EXISTS jsimport_test (id INTEGER PRIMARY KEY, name TEXT, value REAL)", null);
+            var changes = execResult.GetPropertyAsInt32("changes");
+            var error = execResult.GetPropertyAsString("error");
+            QueryResult += $"[JSImport] Create table: changes={changes}, error='{error}'\n";
+
+            // 3. Insert rows
+            var paramJson = System.Text.Json.JsonSerializer.Serialize(
+                new Dictionary<string, object> { ["@name"] = "test1", ["@val"] = 42.5 });
+            execResult = await SqliteJsInterop.ExecuteAsync(dbConn,
+                "INSERT OR REPLACE INTO jsimport_test (id, name, value) VALUES (1, @name, @val)", paramJson);
+            changes = execResult.GetPropertyAsInt32("changes");
+            QueryResult += $"[JSImport] Insert: changes={changes}\n";
+
+            // 4. Query via queryJson (string return — fast path)
+            var json = await SqliteJsInterop.QueryJsonAsync(dbConn,
+                "SELECT * FROM jsimport_test", null);
+            QueryResult += $"[JSImport] QueryJson: {json}\n";
+
+            // 5. Close
+            await SqliteJsInterop.CloseAsync();
+            QueryResult += "[JSImport] Closed. All tests passed!";
+        }
+        catch (Exception ex)
+        {
+            QueryResult = $"[JSImport] ERROR: {ex.Message}\n{ex.StackTrace}";
+        }
+    }
+
+    private async Task DapperTestClick()
+    {
+        try
+        {
+            await using var conn = new SqliteWasmConnection("MyApp", "MyFile");
+            await conn.OpenAsync();
+            QueryResult = "[Dapper] Connected\n";
+
+            // Create table
+            await conn.ExecuteAsync("CREATE TABLE IF NOT EXISTS dapper_test (Id INTEGER PRIMARY KEY, Name TEXT, Score REAL)");
+            QueryResult += "[Dapper] Table created\n";
+
+            // Insert via DbCommand with parameters
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = "INSERT OR REPLACE INTO dapper_test (Id, Name, Score) VALUES (@Id, @Name, @Score)";
+            cmd.Parameters.Add("@Id", 1);
+            cmd.Parameters.Add("@Name", "Alice");
+            cmd.Parameters.Add("@Score", 95.5);
+            var rows = await cmd.ExecuteNonQueryAsync();
+            QueryResult += $"[Dapper] Insert: {rows} row(s)\n";
+
+            // Query via Dapper
+            var results = await conn.QueryAsync<dynamic>("SELECT * FROM dapper_test");
+            foreach (var r in results)
+                QueryResult += $"[Dapper] Row: Id={r.Id}, Name={r.Name}, Score={r.Score}\n";
+
+            // Scalar
+            var count = await conn.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM dapper_test");
+            QueryResult += $"[Dapper] Count: {count}\n";
+
+            // Transaction test
+            var txn = await conn.BeginTransactionAsync();
+            await conn.ExecuteAsync("INSERT OR REPLACE INTO dapper_test (Id, Name, Score) VALUES (2, 'Bob', 88.0)");
+            await txn.CommitAsync();
+            QueryResult += "[Dapper] Transaction committed\n";
+
+            var allRows = await conn.QueryAsync<dynamic>("SELECT * FROM dapper_test ORDER BY Id");
+            foreach (var r in allRows)
+                QueryResult += $"[Dapper] Row: Id={r.Id}, Name={r.Name}, Score={r.Score}\n";
+
+            await conn.CloseAsync();
+            QueryResult += "[Dapper] All tests passed!";
+        }
+        catch (Exception ex)
+        {
+            QueryResult = $"[Dapper] ERROR: {ex.Message}\n{ex.StackTrace}";
+        }
     }
 
 

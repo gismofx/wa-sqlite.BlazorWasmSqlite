@@ -24,8 +24,12 @@ namespace wa_sqlite.BlazorWasmSqlite.BlazorWasmTestApp
 
             builder.Services.AddMudServices();
 
+            var host = builder.Build();
 
-            await builder.Build().RunAsync();
+            // Initialize [JSImport] module (loads sqlite-interop.js ES module)
+            await SqliteJsInterop.InitializeAsync();
+
+            await host.RunAsync();
         }
     }
 }

@@ -1,149 +1,168 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Diagnostics.CodeAnalysis;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Text.Json;
 
-namespace wa_sqlite.BlazorWasmSqlite.DBConnection
+namespace wa_sqlite.BlazorWasmSqlite.DBConnection;
+
+/// <summary>
+/// DataReader backed by in-memory query results from wa-sqlite Worker.
+/// All rows are fetched at construction time (no streaming cursor).
+/// </summary>
+internal sealed class SqliteWasmDbDataReader : DbDataReader
 {
-    internal class SqliteWasmDbDataReader : DbDataReader
+    private readonly List<Dictionary<string, JsonElement>> _rows;
+    private readonly string[] _columns;
+    private readonly int _recordsAffected;
+    private int _currentRow = -1;
+    private bool _closed;
+
+    internal SqliteWasmDbDataReader(
+        List<Dictionary<string, JsonElement>> rows,
+        string[] columns,
+        int recordsAffected = -1)
     {
-        public override object this[int ordinal] => throw new NotImplementedException();
+        _rows = rows;
+        _columns = columns;
+        _recordsAffected = recordsAffected;
+    }
 
-        public override object this[string name] => throw new NotImplementedException();
+    // ── Properties ─────────────────────────────────────────────────────
 
-        public override int Depth => throw new NotImplementedException();
+    public override int FieldCount => _columns.Length;
+    public override int Depth => 0;
+    public override bool HasRows => _rows.Count > 0;
+    public override bool IsClosed => _closed;
+    public override int RecordsAffected => _recordsAffected;
 
-        public override int FieldCount => throw new NotImplementedException();
+    public override object this[int ordinal] => GetValue(ordinal);
+    public override object this[string name] => GetValue(GetOrdinal(name));
 
-        public override bool HasRows => throw new NotImplementedException();
+    // ── Navigation ────────────────────────────────────────────────────
 
-        public override bool IsClosed => throw new NotImplementedException();
+    public override bool Read()
+    {
+        if (_closed) return false;
+        _currentRow++;
+        return _currentRow < _rows.Count;
+    }
 
-        public override int RecordsAffected => throw new NotImplementedException();
+    public override bool NextResult() => false;
 
-        public override bool GetBoolean(int ordinal)
+    public override void Close() => _closed = true;
+
+    public override IEnumerator GetEnumerator() =>
+        new DbEnumerator(this, closeReader: false);
+
+    // ── Column metadata ───────────────────────────────────────────────
+
+    public override string GetName(int ordinal) => _columns[ordinal];
+
+    public override int GetOrdinal(string name)
+    {
+        for (int i = 0; i < _columns.Length; i++)
+            if (string.Equals(_columns[i], name, StringComparison.OrdinalIgnoreCase))
+                return i;
+        throw new IndexOutOfRangeException($"Column '{name}' not found.");
+    }
+
+    public override string GetDataTypeName(int ordinal) => "TEXT";
+
+    [return: DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.PublicProperties)]
+    public override Type GetFieldType(int ordinal) => typeof(object);
+
+    // ── Value access ──────────────────────────────────────────────────
+
+    private JsonElement GetElement(int ordinal)
+    {
+        var row = _rows[_currentRow];
+        var colName = _columns[ordinal];
+        return row.TryGetValue(colName, out var el) ? el : default;
+    }
+
+    public override bool IsDBNull(int ordinal) =>
+        GetElement(ordinal).ValueKind == JsonValueKind.Null ||
+        GetElement(ordinal).ValueKind == JsonValueKind.Undefined;
+
+    public override object GetValue(int ordinal)
+    {
+        var el = GetElement(ordinal);
+        return el.ValueKind switch
         {
-            throw new NotImplementedException();
+            JsonValueKind.String => el.GetString()!,
+            JsonValueKind.Number => el.TryGetInt64(out var l) ? l : el.GetDouble(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Null or JsonValueKind.Undefined => DBNull.Value,
+            _ => el.GetRawText()
+        };
+    }
+
+    public override int GetValues(object[] values)
+    {
+        var count = Math.Min(values.Length, _columns.Length);
+        for (int i = 0; i < count; i++)
+            values[i] = GetValue(i);
+        return count;
+    }
+
+    public override string GetString(int ordinal) => GetElement(ordinal).GetString()!;
+    public override int GetInt32(int ordinal) => GetElement(ordinal).GetInt32();
+    public override long GetInt64(int ordinal) => GetElement(ordinal).GetInt64();
+    public override double GetDouble(int ordinal) => GetElement(ordinal).GetDouble();
+    public override float GetFloat(int ordinal) => (float)GetElement(ordinal).GetDouble();
+    public override decimal GetDecimal(int ordinal) => GetElement(ordinal).GetDecimal();
+    public override bool GetBoolean(int ordinal) => GetElement(ordinal).GetBoolean();
+    public override byte GetByte(int ordinal) => GetElement(ordinal).GetByte();
+    public override short GetInt16(int ordinal) => GetElement(ordinal).GetInt16();
+    public override char GetChar(int ordinal) => GetElement(ordinal).GetString()![0];
+    public override Guid GetGuid(int ordinal) => Guid.Parse(GetElement(ordinal).GetString()!);
+
+    public override DateTime GetDateTime(int ordinal)
+    {
+        var s = GetElement(ordinal).GetString();
+        return DateTime.Parse(s!);
+    }
+
+    public override long GetBytes(int ordinal, long dataOffset, byte[]? buffer, int bufferOffset, int length) =>
+        throw new NotSupportedException();
+
+    public override long GetChars(int ordinal, long dataOffset, char[]? buffer, int bufferOffset, int length) =>
+        throw new NotSupportedException();
+
+    // ── Factory ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Parse the JSON result string from <see cref="SqliteJsInterop.QueryJsonAsync"/>
+    /// into a DataReader.
+    /// </summary>
+    internal static SqliteWasmDbDataReader FromJson(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        var error = root.GetProperty("error").GetString();
+        if (!string.IsNullOrEmpty(error))
+            throw new Exception($"SQLite query error: {error}");
+
+        var dataArray = root.GetProperty("data");
+        var rows = new List<Dictionary<string, JsonElement>>();
+        var columnSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var rowEl in dataArray.EnumerateArray())
+        {
+            var row = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+            foreach (var prop in rowEl.EnumerateObject())
+            {
+                row[prop.Name] = prop.Value.Clone();
+                columnSet.Add(prop.Name);
+            }
+            rows.Add(row);
         }
 
-        public override byte GetByte(int ordinal)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override long GetBytes(int ordinal, long dataOffset, byte[]? buffer, int bufferOffset, int length)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override char GetChar(int ordinal)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override long GetChars(int ordinal, long dataOffset, char[]? buffer, int bufferOffset, int length)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override string GetDataTypeName(int ordinal)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override DateTime GetDateTime(int ordinal)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override decimal GetDecimal(int ordinal)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override double GetDouble(int ordinal)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override IEnumerator GetEnumerator()
-        {
-            throw new NotImplementedException();
-        }
-
-        [return: DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.PublicProperties)]
-        public override Type GetFieldType(int ordinal)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override float GetFloat(int ordinal)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override Guid GetGuid(int ordinal)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override short GetInt16(int ordinal)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override int GetInt32(int ordinal)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override long GetInt64(int ordinal)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override string GetName(int ordinal)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override int GetOrdinal(string name)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override string GetString(int ordinal)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override object GetValue(int ordinal)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override int GetValues(object[] values)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override bool IsDBNull(int ordinal)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override bool NextResult()
-        {
-            throw new NotImplementedException();
-        }
-
-        public override bool Read()
-        {
-            throw new NotImplementedException();
-        }
+        var columns = new string[columnSet.Count];
+        columnSet.CopyTo(columns);
+        return new SqliteWasmDbDataReader(rows, columns);
     }
 }

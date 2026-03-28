@@ -96,4 +96,8 @@ window.sqlite = {
     query: async function (dbConn, sql, parameters) {
         return await invoke('query', dbConn, sql, parameters || null);
     },
+
+    executeBatch: async function (dbConn, batch) {
+        return await invoke('executeBatch', dbConn, batch);
+    },
 };
