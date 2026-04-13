@@ -1,154 +1,218 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Reflection;
+using System.Text;
 using wa_sqlite.BlazorWasmSqlite.Attributes;
-using System.Diagnostics.Tracing;
 
 namespace wa_sqlite.BlazorWasmSqlite.Extensions
 {
     /// <summary>
-    /// Class helps create Sqlite tables based on a model class
+    /// Generates SQLite DDL (CREATE TABLE, CREATE INDEX) from C# model classes.
     /// </summary>
+    /// <remarks>
+    /// Column definitions are driven by <see cref="SqliteColumnAttribute"/>. When the attribute
+    /// is absent, sensible defaults are inferred from the C# property type:
+    /// <list type="bullet">
+    ///   <item><description>SQLite type is mapped from the C# type (see <see cref="GetSqliteColumnFromType"/>).</description></item>
+    ///   <item><description>Nullability: value types → <c>NOT NULL</c>; reference types and <c>Nullable&lt;T&gt;</c> → nullable.</description></item>
+    ///   <item><description>DEFAULT: inferred for <c>NOT NULL</c> columns (see <see cref="InferDefaultValue"/>).</description></item>
+    /// </list>
+    /// Properties decorated with <see cref="SqliteColumnIgnoreAttribute"/> are excluded entirely.
+    /// </remarks>
     public class SqliteTableCreator
     {
         public TableCreatorOptions Options { get; init; }
 
         public SqliteTableCreator(TableCreatorOptions options = null)
         {
-            if (options == null) Options = new TableCreatorOptions();
-            else Options = options;
+            Options = options ?? new TableCreatorOptions();
         }
 
         /// <summary>
-        /// Generate sqlite table created code
-        /// Generate any index create code 
+        /// Generates the DDL statements required to create a SQLite table for <paramref name="type"/>.
         /// </summary>
-        /// <typeparam name="T"></typeparam>
-        /// <returns>First value in list is alwasy the table create code. Subsequent values, if any, are column index creates</returns>
-        public static List<string> GenerateSqliteCreateTable(Type type) //where T : ISyncableEntity
+        /// <param name="type">The entity type to generate DDL for.</param>
+        /// <returns>
+        /// A list where the first element is the <c>CREATE TABLE</c> statement and any subsequent
+        /// elements are <c>CREATE INDEX</c> statements for indexed columns.
+        /// </returns>
+        public static List<string> GenerateSqliteCreateTable(Type type)
         {
-
             var tableName = SqliteWasmExtensions.GetTableName(type);
-            //var props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
             var props = SqliteWasmExtensions.GetAllColumns(type);
-            var sb = new StringBuilder($"CREATE TABLE {tableName} (");
-            var columnProps = new List<string>();
-            foreach (var prop in props)
-            {
-                var colCreate = ColumnCreate(prop);
-                columnProps.Add(colCreate);
-            }
-            sb.Append(string.Join($",", columnProps));//\r\n
-            sb.Append(");");
-            //return sb.ToString();
 
-            var creates = new List<string>();
-            creates.Add(sb.ToString());
-            var indexes = GenerateColumnIndexes(props,tableName);
-            creates.AddRange(indexes);
-            return creates;
+            var columnDefs = props.Select(ColumnCreate).ToList();
+            var ddl = $"CREATE TABLE {tableName} ({string.Join(",", columnDefs)});";
 
+            var result = new List<string> { ddl };
+            result.AddRange(GenerateColumnIndexes(props, tableName));
+            return result;
         }
 
+        /// <summary>
+        /// Generates the DDL statements required to create a SQLite table for <typeparamref name="T"/>.
+        /// </summary>
+        /// <typeparam name="T">The entity type to generate DDL for.</typeparam>
+        /// <returns>
+        /// A list where the first element is the <c>CREATE TABLE</c> statement and any subsequent
+        /// elements are <c>CREATE INDEX</c> statements for indexed columns.
+        /// </returns>
+        public static List<string> GenerateSqliteCreateTable<T>() => GenerateSqliteCreateTable(typeof(T));
+
+        /// <summary>
+        /// Builds a single column definition fragment for use in CREATE TABLE or ALTER TABLE DDL.
+        /// </summary>
         private static string ColumnCreate(PropertyInfo prop)
         {
-            //Get the attribute or create a new one with defaults
-            var columnAtt = GetSqliteColumnAttributeOrDefault(prop);
+            var att = GetSqliteColumnAttributeOrDefault(prop);
 
-            //is is an 'Id'?  Then it's primary key
             var pk = prop.Name.Equals("Id", StringComparison.OrdinalIgnoreCase) ? "PRIMARY KEY" : string.Empty;
+            var collate = att.ColumnType == SqliteType.Text && !att.CaseSensitive ? "COLLATE NOCASE" : string.Empty;
 
-            //get it's type
-            var sqlType = columnAtt.ColumnType;
-            //if text and case insensitive COLLATE NOCASE
-            var collate = (sqlType == "TEXT" && columnAtt.CaseSensitive == false) ? "COLLATE NOCASE" : string.Empty;
-            
-            return $"{prop.Name} {sqlType} {collate} {pk} {(columnAtt.Unique ? "UNIQUE" : "")} {(columnAtt.AllowNull ? "" : "NOT NULL")}".Trim();
+            // PRIMARY KEY implies NOT NULL and UNIQUE, and creates its own index — suppress redundant clauses
+            var isPk = !string.IsNullOrEmpty(pk);
+            var notNull = !isPk && att.Nullability == SqliteNullability.NotNull ? "NOT NULL" : string.Empty;
+            var unique = att.Unique ? "UNIQUE" : string.Empty;
+
+            var defaultClause = string.Empty;
+            if (!isPk && att.Nullability == SqliteNullability.NotNull)
+            {
+                var defaultVal = att.DefaultValue ?? InferDefaultValue(prop.PropertyType);
+                if (defaultVal != null) defaultClause = $"DEFAULT {defaultVal}";
+            }
+
+            // Build fragment, collapsing multiple spaces from empty tokens
+            var parts = new[] { prop.Name, att.ColumnType, collate, pk, unique, notNull, defaultClause }
+                .Where(p => !string.IsNullOrEmpty(p));
+            return string.Join(" ", parts);
         }
 
+        /// <summary>
+        /// Resolves the <see cref="SqliteColumnAttribute"/> for a property, filling in inferred
+        /// values for any settings not explicitly provided.
+        /// </summary>
         private static SqliteColumnAttribute GetSqliteColumnAttributeOrDefault(PropertyInfo prop)
         {
-            var att = prop.GetCustomAttribute<SqliteColumnAttribute>() ?? new SqliteColumnAttribute(sqliteColumnType:GetSqliteColumnFromType(prop.PropertyType));
-            if (string.IsNullOrWhiteSpace(att.ColumnType)) att.ColumnType = GetSqliteColumnFromType(prop.PropertyType);
+            var att = prop.GetCustomAttribute<SqliteColumnAttribute>()
+                      ?? new SqliteColumnAttribute(sqliteColumnType: GetSqliteColumnFromType(prop.PropertyType));
+
+            if (string.IsNullOrWhiteSpace(att.ColumnType))
+                att.ColumnType = GetSqliteColumnFromType(prop.PropertyType);
+
+            // Resolve Infer → Nullable or NotNull based on C# type
+            if (att.Nullability == SqliteNullability.Infer)
+                att.Nullability = IsNullableType(prop.PropertyType)
+                    ? SqliteNullability.Nullable
+                    : SqliteNullability.NotNull;
+
             return att;
         }
 
-        private static List<string> GenerateColumnIndexes(List<PropertyInfo?> entityProperties, string tableName)
+        private static List<string> GenerateColumnIndexes(IEnumerable<PropertyInfo> props, string tableName)
         {
-            var indexCommands = new List<string>(); 
-            var indexes = entityProperties.Where(x => x.GetCustomAttribute<SqliteColumnAttribute>() != null);//.ToList();
-            
-            if (!indexes.Any()) return indexCommands;
-            
-            foreach (var prop in indexes!)
-            {
-                var att = prop.GetCustomAttribute<SqliteColumnAttribute>();
-                var indexCreate = att.Index ? $"CREATE {(att.Unique ? "UNIQUE" : "")} INDEX IF NOT EXISTS ind_{prop.Name}_{tableName} on {tableName} ({prop.Name})" : string.Empty;
-                indexCommands.Add(indexCreate);
-            }
-
-            return indexCommands;
-
+            return props
+                .Select(p => (prop: p, att: p.GetCustomAttribute<SqliteColumnAttribute>()))
+                .Where(x => x.att?.Index == true)
+                .Select(x =>
+                {
+                    var unique = x.att.Unique ? "UNIQUE " : string.Empty;
+                    return $"CREATE {unique}INDEX IF NOT EXISTS ind_{x.prop.Name}_{tableName} ON {tableName} ({x.prop.Name})";
+                })
+                .ToList();
         }
 
         /// <summary>
-        /// Generate sqlite table created code
-        /// Generate any index create code 
+        /// Returns <c>true</c> when <paramref name="type"/> can hold a <c>null</c> value —
+        /// i.e. it is a reference type or a <c>Nullable&lt;T&gt;</c> value type.
         /// </summary>
-        /// <typeparam name="T"></typeparam>
-        /// <returns>First value in list is alwasy the table create code. Subsequent values, if any, are column index creates</returns>
-        public static List<string> GenerateSqliteCreateTable<T>() //where T : ISyncableEntity
-        {
-            var type = typeof(T);
-            return GenerateSqliteCreateTable(type);
-        }
-
+        private static bool IsNullableType(Type type) =>
+            !type.IsValueType || Nullable.GetUnderlyingType(type) != null;
 
         /// <summary>
-        /// Map a C# type to a sqlite type
+        /// Maps a C# <see cref="Type"/> to its canonical SQLite storage type affinity.
+        /// <c>Nullable&lt;T&gt;</c> is unwrapped before mapping so <c>int?</c> maps the same as <c>int</c>.
         /// </summary>
-        /// <param name="type"></param>
-        /// <returns></returns>
-        /// <exception cref="NotImplementedException"></exception>
+        /// <param name="type">The C# property type to map.</param>
+        /// <returns>
+        /// A SQLite type affinity string (see <see cref="SqliteType"/> constants).
+        /// Unknown types fall back to <c>"TEXT"</c> so they are stored as their string representation.
+        /// </returns>
         public static string GetSqliteColumnFromType(Type type)
         {
-            var t = type.Name;
-            if (t.Contains("Nullable"))
-            {
-                t = type.ToString().Split("[")[1];
+            // Unwrap Nullable<T> — int? and int both map to INTEGER, etc.
+            var t = Nullable.GetUnderlyingType(type) ?? type;
 
-                t=t.Remove(t.Length - 1).Replace("System.","");
-            }
-                
-            switch (t)
-            {
-                case nameof(String):
-                    return "TEXT";
-                case nameof(DateTime):
-                    return "NUMERIC";//return "TEXT";
-                case nameof(UInt32): //unit
-                case nameof(UInt64): //ulong
-                case nameof(UInt128): //
-                case nameof(Int32): //int
-                case nameof(Int64): //long
-                case nameof(Int128): //Long
-                    return "INTEGER";
-                case nameof(Boolean):
-                    return "BOOLEAN";
-                case nameof(Double):
-                    return "DOUBLE";
-                case nameof(Decimal):
-                    return "NUMERIC";
-                default:
-                    throw new NotImplementedException($"No mapping for {t}");
+            if (t == typeof(string))  return SqliteType.Text;
+            if (t == typeof(Guid))    return SqliteType.Text;
 
-            }
-            //var type = prop.PropertyType.ToString();
+            // Booleans are stored as INTEGER (0/1). SQLite has no native boolean type;
+            // BOOLEAN is accepted but resolves to NUMERIC affinity — INTEGER is more explicit.
+            if (t == typeof(bool))    return SqliteType.Integer;
+
+            if (t == typeof(int)    ||
+                t == typeof(uint)   ||
+                t == typeof(long)   ||
+                t == typeof(ulong)  ||
+                t == typeof(short)  ||
+                t == typeof(ushort) ||
+                t == typeof(byte)   ||
+                t == typeof(sbyte))    return SqliteType.Integer;
+
+            // Int128 / UInt128 — available in .NET 7+
+            if (t.Name == nameof(Int128) || t.Name == nameof(UInt128))
+                return SqliteType.Integer;
+
+            // REAL is SQLite's canonical floating-point affinity (8-byte IEEE 754).
+            // DOUBLE and FLOAT are accepted but resolve to REAL affinity anyway.
+            if (t == typeof(double) || t == typeof(float))
+                return SqliteType.Real;
+
+            // NUMERIC affinity for decimal (arbitrary precision).
+            if (t == typeof(decimal)) return SqliteType.Numeric;
+
+            // DateTime and DateTimeOffset are stored as ISO 8601 TEXT strings
+            // (e.g. "2026-04-12T10:30:00Z"). TEXT is the correct affinity — NUMERIC
+            // would coerce the string to a number, which fails for ISO 8601 values.
+            // If you need Unix epoch storage, use a dedicated long/int property instead.
+            if (t == typeof(DateTime) || t == typeof(DateTimeOffset))
+                return SqliteType.Text;
+
+            // Unknown type — fall back to TEXT so the property can be stored as its
+            // string representation. Add an explicit [SqliteColumn] to override.
+            return SqliteType.Text;
         }
 
+        /// <summary>
+        /// Infers a safe SQL <c>DEFAULT</c> literal for a C# property type when none is
+        /// explicitly provided via <see cref="SqliteColumnAttribute.DefaultValue"/>.
+        /// </summary>
+        /// <param name="type">The C# property type.</param>
+        /// <returns>
+        /// A SQL literal string (e.g. <c>"0"</c>, <c>"''"</c>), or <c>null</c> when the
+        /// type is nullable and no default is required.
+        /// </returns>
+        public static string? InferDefaultValue(Type type)
+        {
+            // Nullable<T> and reference types don't need a DEFAULT
+            if (Nullable.GetUnderlyingType(type) != null) return null;
+            if (!type.IsValueType) return null;
 
+            var t = type;
+            if (t == typeof(bool)   || t == typeof(int)    || t == typeof(uint)  ||
+                t == typeof(long)   || t == typeof(ulong)  || t == typeof(short) ||
+                t == typeof(ushort) || t == typeof(byte)   || t == typeof(sbyte) ||
+                t == typeof(double) || t == typeof(float)  || t == typeof(decimal))
+                return "0";
+
+            if (t.Name == nameof(Int128) || t.Name == nameof(UInt128))
+                return "0";
+
+            // Guid, DateTime, DateTimeOffset stored as TEXT — empty string is a safe baseline
+            if (t == typeof(Guid) || t == typeof(DateTime) || t == typeof(DateTimeOffset))
+                return "''";
+
+            return null;
+        }
     }
 }

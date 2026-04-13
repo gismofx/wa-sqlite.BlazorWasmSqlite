@@ -11,8 +11,11 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Transactions;
+using wa_sqlite.BlazorWasmSqlite.Batch;
+using wa_sqlite.BlazorWasmSqlite.DBConnection;
 
 namespace wa_sqlite.BlazorWasmSqlite.Extensions
 {
@@ -25,6 +28,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
         private static readonly ConcurrentDictionary<RuntimeTypeHandle, string> GetQueries = new ConcurrentDictionary<RuntimeTypeHandle, string>();
         private static readonly ConcurrentDictionary<RuntimeTypeHandle, string> TypeTableName = new ConcurrentDictionary<RuntimeTypeHandle, string>();
 
+        [Obsolete("Use SqliteWasmConnection with Dapper QueryFirstOrDefaultAsync instead.", error: false)]
         public static async Task<T> FindById<T>(this SqliteWasmInterop interop, string id) where T : class
         {
             var tableName = GetTableName<T>();
@@ -35,6 +39,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
         }
 
 
+        [Obsolete("Use SqliteWasmConnection with Dapper instead.", error: false)]
         public enum SortOrderDirection
         {
             Ascending,
@@ -43,6 +48,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             DescendingCI,
         }
 
+        [Obsolete("Use SqliteWasmConnection with Dapper QueryAsync + LIMIT/OFFSET instead.", error: false)]
         public static async Task<(IEnumerable<T> records, int totalRecords)> FindPaginated<T>(this SqliteWasmInterop interop,
                                                                                     int page,
                                                                                     int maxRecordsPerPage,
@@ -121,12 +127,16 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             return (records,total);
         }
 
+        /// <summary>[Obsolete] Use <see cref="UpsertAsync{T}"/> on <see cref="SqliteWasmConnection"/> instead.</summary>
+        [Obsolete("Use UpsertAsync<T> on SqliteWasmConnection instead.", error: false)]
         public static async Task<int> Upsert<T>(this SqliteWasmInterop interop, T record, string tableName)
         {
             return await interop.Upsert<T>(new List<T>() { record }, tableName);
         }
 
-        public static async Task<int> Upsert<T>(this SqliteWasmInterop interop, IEnumerable<T> records, string tableName) //where T : IEnumerable<T>
+        /// <summary>[Obsolete] Use <see cref="UpsertAsync{T}"/> on <see cref="SqliteWasmConnection"/> instead.</summary>
+        [Obsolete("Use UpsertAsync<T> on SqliteWasmConnection instead.", error: false)]
+        public static async Task<int> Upsert<T>(this SqliteWasmInterop interop, IEnumerable<T> records, string tableName)
         {
             //var type = GetTypeOrGenericType(typeof(T));
             var type = typeof(T);
@@ -310,53 +320,42 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
         }
 
 
-        private static async Task<int> ReplaceInto<T>(this SqliteWasmInterop interop,
-                                       string intoTableName,
-                                       IEnumerable<string> columns,
-                                       IEnumerable<T> entitiesToReplaceInto,//,
-                                       IDbTransaction transaction = null,
-                                       int? commandTimeout = null)
-        {
-            var valueSb = new StringBuilder();
-            var inserts = new List<string>();//list of each record's values in sql format in columm order
-            //var dynamicParams = new DynamicParameters();
-            long i = 0;
-            var sqlParams = new Dictionary<string, object>();
-            //foreach (var record in entitiesToReplaceInto)
-            foreach (var record in entitiesToReplaceInto)
-            {
-                var recordAsDict = JsonSerializer.Deserialize<Dictionary<string, object>>(JsonSerializer.Serialize(record));
-                var valueList = new List<string>();
-                foreach (var column in columns)
-                {
-                    var p = $"@p{i}";
-                    sqlParams.Add(p, recordAsDict[column]);// maybe needs @ symbol?
-                    //dynamicParams.Add(p, record[column]);
-                    valueList.Add(p);// $"@{p}");
-                    i++;
-                }
-                valueSb.Append("(");
-                valueSb.Append(string.Join(",", valueList));
-                valueSb.Append(")");
-                inserts.Add(valueSb.ToString());
-                valueSb.Clear();
-            }
+        // ── SqliteWasmConnection extension — high-performance path ───────────
 
-            return await interop.ReplaceInto(intoTableName, columns, inserts, sqlParams, transaction, commandTimeout);
+        /// <summary>
+        /// Upserts a collection of entities directly via the Worker raw payload path.
+        /// Uses <c>INSERT INTO ... ON CONFLICT(pk) DO UPDATE SET</c>.
+        /// Significantly faster than <see cref="Upsert{T}(SqliteWasmInterop, IEnumerable{T}, string)"/>:
+        /// zero named-parameter overhead, single Worker round-trip per batch.
+        /// </summary>
+        /// <typeparam name="T">Entity type. Must serialize to a flat JSON object.</typeparam>
+        /// <param name="connection">Open <see cref="SqliteWasmConnection"/>.</param>
+        /// <param name="tableName">Target SQLite table name.</param>
+        /// <param name="records">Entities to upsert. Must be non-empty.</param>
+        /// <param name="primaryKey">Primary key column name (default <c>"Id"</c>).</param>
+        /// <param name="rowsPerStatement">Rows per INSERT statement (default 100).</param>
+        /// <param name="options">Optional JSON serializer options.</param>
+        /// <param name="ct">Cancellation token.</param>
+        /// <returns>Total rows affected.</returns>
+        public static async Task<int> UpsertAsync<T>(
+            this SqliteWasmConnection connection,
+            string tableName,
+            IEnumerable<T> records,
+            string primaryKey = "Id",
+            int rowsPerStatement = 100,
+            JsonSerializerOptions? options = null,
+            CancellationToken ct = default)
+        {
+            var payload = SqliteWorkerPayloadBuilder.BuildUpsertPayload(
+                tableName, records, primaryKey, rowsPerStatement, options);
+            using var result = await SqliteJsInterop.BulkInsertRawUpsertAsync(
+                connection.ConnectionHandle, payload);
+            return result != null
+                ? (int)result.GetPropertyAsDouble("totalChanges")
+                : 0;
         }
 
-        private static async Task<int> ReplaceInto(this SqliteWasmInterop interop,
-                                                   string tableName,
-                                                   IEnumerable<string> columns,
-                                                   List<string> recordInserts,
-                                                   Dictionary<string, object> parameters,
-                                                   IDbTransaction transaction,
-                                                   int? commandTimeout = null)
-        {
-            var cmd = $"REPLACE INTO {tableName} ({String.Join(",", columns)}) VALUES {String.Join(",", recordInserts)}";
-            return await interop.Execute(cmd, parameters);// .ExecuteAsync(cmd, parameters, transaction, commandTimeout);
-        }
-
+        [Obsolete("Use SqliteWasmConnection with Dapper ExecuteAsync('DROP TABLE IF EXISTS ...') instead.", error: false)]
         public static async Task<int> DropTable(this SqliteWasmInterop interop, string tableName)
         {
             var resultDropSql = $"DROP TABLE IF EXISTS {tableName};";
@@ -364,6 +363,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             return dropResult;
         }
 
+        [Obsolete("Use SqliteWasmConnection with Dapper ExecuteAsync('DROP VIEW IF EXISTS ...') instead.", error: false)]
         public static async Task<int> DropView(this SqliteWasmInterop interop, string viewName)
         {
             var resultDropSql = $"DROP VIEW IF EXISTS {viewName};";
@@ -422,6 +422,10 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
 
         private static bool IsWriteable(PropertyInfo pi)
         {
+            // [SqliteColumnIgnore] excludes from all SQLite operations (schema, insert, update)
+            if (pi.GetCustomAttributes(false).Any(a => a.GetType().Name == "SqliteColumnIgnoreAttribute"))
+                return false;
+
             var attributes = pi.GetCustomAttributes(false).Where(x => x.GetType().Name == "WriteAttribute").ToList(); // typeof(WriteAttribute), false
             if (attributes.Any())
             {

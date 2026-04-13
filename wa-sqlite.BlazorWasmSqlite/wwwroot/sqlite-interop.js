@@ -58,14 +58,38 @@ export async function query(dbConn, sql, paramsJson) {
 }
 
 /**
- * Execute a batch of SQL statements in a single Worker round-trip.
+ * Bulk INSERT from a \0-delimited raw payload — zero C# re-serialization.
+ * Uses INSERT OR REPLACE INTO — fastest path for seeding into empty tables.
+ * Does not preserve existing row data on conflict. Use for initial seeding only.
  * @param {number} dbConn - connection handle
- * @param {string} batchJson - JSON array of {sql, params} objects
- * @returns {Promise<object>} { totalChanges: number, errors: [{index, error}] }
+ * @param {string} payload - \0-delimited: table\0primaryKey\0rowsPerStmt\0colCount\0col1\0...\0line1\0...
+ * @returns {Promise<{totalChanges: number, errors: Array}>}
  */
-export async function executeBatch(dbConn, batchJson) {
-    const batch = JSON.parse(batchJson);
-    return await window.sqlite.executeBatch(dbConn, batch);
+export async function bulkInsertRaw(dbConn, payload) {
+    return await window.sqlite.bulkInsertRaw(dbConn, payload);
+}
+
+/**
+ * Bulk UPSERT from a \0-delimited raw payload — zero C# re-serialization.
+ * Uses INSERT INTO ... ON CONFLICT DO UPDATE SET — preserves existing row data.
+ * Use for incremental sync where rows may already exist locally.
+ * @param {number} dbConn - connection handle
+ * @param {string} payload - \0-delimited: table\0primaryKey\0rowsPerStmt\0colCount\0col1\0...\0line1\0...
+ * @returns {Promise<{totalChanges: number, errors: Array}>}
+ */
+export async function bulkInsertRawUpsert(dbConn, payload) {
+    return await window.sqlite.bulkInsertRawUpsert(dbConn, payload);
+}
+
+/**
+ * Delete an IndexedDB database by name.
+ * Does NOT go through the Worker — this is a browser-level IDB operation.
+ * The caller must close any open SqliteWasmConnection for this fileName first.
+ * @param {string} fileName - IDB database name (matches the fileName passed to open())
+ * @returns {Promise<boolean>} resolves true on success
+ */
+export async function deleteDatabase(fileName) {
+    return await window.sqlite.deleteDatabase(fileName);
 }
 
 /**

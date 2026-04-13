@@ -1,9 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace wa_sqlite.BlazorWasmSqlite
 {
@@ -11,6 +6,7 @@ namespace wa_sqlite.BlazorWasmSqlite
     {
         public static IServiceCollection AddSqliteWasmInterop(this IServiceCollection services)
         {
+            SqliteWasmDapperTypeHandlers.Register();
             services.AddSingleton<SqliteWasmInterop>();
             return services;
         }

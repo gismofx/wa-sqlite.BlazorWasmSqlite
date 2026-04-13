@@ -14,6 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="8.0.11" />
   </ItemGroup>
 	
@@ -22,7 +23,7 @@
 		<NpmScript Condition="'$(Configuration)' != 'Release'">dev</NpmScript>
 	</PropertyGroup>
 
-	<Target Name="InstallAndRunNpm" BeforeTargets="PreBuildEvent">
+	<Target Name="InstallAndRunNpm" BeforeTargets="PreBuildEvent" Condition="'$(SkipNpmBuild)' != 'true'">
 		<Exec Command="npm install" WorkingDirectory="NpmJS" />
 		<Exec Command="npm run-script $(NpmScript)" WorkingDirectory="NpmJS" />
 	</Target>

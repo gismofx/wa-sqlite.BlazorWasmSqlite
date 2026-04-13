@@ -114,7 +114,16 @@ internal sealed class SqliteWasmDbDataReader : DbDataReader
     public override double GetDouble(int ordinal) => GetElement(ordinal).GetDouble();
     public override float GetFloat(int ordinal) => (float)GetElement(ordinal).GetDouble();
     public override decimal GetDecimal(int ordinal) => GetElement(ordinal).GetDecimal();
-    public override bool GetBoolean(int ordinal) => GetElement(ordinal).GetBoolean();
+    public override bool GetBoolean(int ordinal)
+    {
+        var el = GetElement(ordinal);
+        // SQLite stores bool as INTEGER 0/1 → arrives as JsonValueKind.Number.
+        // Convert.ToBoolean(double) is the standard .NET numeric-to-bool idiom:
+        // false for 0.0, true for anything else. Handles float64 round-trip from JS.
+        if (el.ValueKind == JsonValueKind.Number)
+            return Convert.ToBoolean(el.GetDouble());
+        return el.GetBoolean();
+    }
     public override byte GetByte(int ordinal) => GetElement(ordinal).GetByte();
     public override short GetInt16(int ordinal) => GetElement(ordinal).GetInt16();
     public override char GetChar(int ordinal) => GetElement(ordinal).GetString()![0];
@@ -122,8 +131,16 @@ internal sealed class SqliteWasmDbDataReader : DbDataReader
 
     public override DateTime GetDateTime(int ordinal)
     {
-        var s = GetElement(ordinal).GetString();
-        return DateTime.Parse(s!);
+        var el = GetElement(ordinal);
+        // Legacy: epoch seconds stored as JSON number (old SqliteWasmInterop write path)
+        if (el.ValueKind == JsonValueKind.Number)
+            return DateTime.UnixEpoch.AddSeconds(el.GetInt64());
+        var s = el.GetString()!;
+        // Legacy: epoch seconds stored as string
+        if (long.TryParse(s, out var epoch))
+            return DateTime.UnixEpoch.AddSeconds(epoch);
+        // Current: ISO 8601
+        return DateTime.Parse(s);
     }
 
     public override long GetBytes(int ordinal, long dataOffset, byte[]? buffer, int bufferOffset, int length) =>

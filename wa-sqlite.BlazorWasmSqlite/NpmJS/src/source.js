@@ -89,15 +89,66 @@ window.sqlite = {
         return await invoke('close');
     },
 
+    /**
+     * Execute a SQL statement (INSERT, UPDATE, DELETE, DDL).
+     * @param {number} dbConn - connection handle
+     * @param {string} sql - SQL statement
+     * @param {Object|null} parameters - bound parameters or null
+     * @returns {Promise<{changes: number, error: string}>}
+     */
     execute: async function (dbConn, sql, parameters) {
         return await invoke('execute', dbConn, sql, parameters || null);
     },
 
+    /**
+     * Execute a SQL query (SELECT).
+     * @param {number} dbConn - connection handle
+     * @param {string} sql - SQL statement
+     * @param {Object|null} parameters - bound parameters or null
+     * @returns {Promise<{data: Array, error: string}>}
+     */
     query: async function (dbConn, sql, parameters) {
         return await invoke('query', dbConn, sql, parameters || null);
     },
 
-    executeBatch: async function (dbConn, batch) {
-        return await invoke('executeBatch', dbConn, batch);
+    /**
+     * Bulk INSERT from a \0-delimited raw payload — zero C# re-serialization.
+     * Uses INSERT OR REPLACE INTO — fastest path for seeding into empty tables.
+     * Payload built by SqliteWorkerPayloadBuilder.BuildRawPayload.
+     * @param {number} dbConn - connection handle
+     * @param {string} payloadJson - \0-delimited payload string
+     * @returns {Promise<{totalChanges: number, errors: Array}>}
+     */
+    bulkInsertRaw: async function (dbConn, payloadJson) {
+        return await invoke('bulkInsertRaw', dbConn, payloadJson);
+    },
+
+    /**
+     * Bulk UPSERT from a \0-delimited raw payload — zero C# re-serialization.
+     * Uses INSERT INTO ... ON CONFLICT DO UPDATE SET — for incremental sync.
+     * Payload built by SqliteWorkerPayloadBuilder.BuildRawPayload or BuildUpsertPayload.
+     * @param {number} dbConn - connection handle
+     * @param {string} payloadJson - \0-delimited payload string
+     * @returns {Promise<{totalChanges: number, errors: Array}>}
+     */
+    bulkInsertRawUpsert: async function (dbConn, payloadJson) {
+        return await invoke('bulkInsertRawUpsert', dbConn, payloadJson);
+    },
+
+    /**
+     * Delete an IndexedDB database by name.
+     * Does NOT go through the Worker — this is a browser-level operation.
+     * Useful for dev tooling to force a clean reseed without opening DevTools.
+     * The caller is responsible for closing any open connection first.
+     * @param {string} fileName - IDB database name (matches the fileName passed to open())
+     * @returns {Promise<boolean>} resolves true on success
+     */
+    deleteDatabase: function (fileName) {
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.deleteDatabase(fileName);
+            req.onsuccess = () => resolve(true);
+            req.onerror   = () => reject(req.error);
+            req.onblocked = () => reject(new Error(`IDB delete blocked: close all connections to '${fileName}' first`));
+        });
     },
 };

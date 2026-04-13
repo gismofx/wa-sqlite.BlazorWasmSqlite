@@ -18,6 +18,7 @@ using wa_sqlite.BlazorWasmSqlite.JsonConverters;
 
 namespace wa_sqlite.BlazorWasmSqlite;
 
+[Obsolete("This class is obsoleted. Use SqliteWasmConnection instead. This class will be removed in a future release.")]
 public class SqliteWasmInterop
 {
     private readonly Lazy<Task<IJSObjectReference>> moduleTask;

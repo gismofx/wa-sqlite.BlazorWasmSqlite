@@ -1,0 +1,313 @@
+@page "/dbreader-tests"
+@using Dapper
+@using wa_sqlite.BlazorWasmSqlite
+@using wa_sqlite.BlazorWasmSqlite.DBConnection
+@using System.Linq
+
+<PageTitle>DbDataReader Type Tests</PageTitle>
+
+<MudContainer>
+    <MudText Typo="Typo.h5" Class="mb-4">SqliteWasmDbDataReader — Type Coercion Tests</MudText>
+
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="RunAll" Class="mb-4">
+        Run All Tests
+    </MudButton>
+
+    @if (_results.Any())
+    {
+        <MudSimpleTable Dense="true" Striped="true">
+            <thead><tr><th>Test</th><th>Result</th><th>Detail</th></tr></thead>
+            <tbody>
+                @foreach (var r in _results)
+                {
+                    <tr>
+                        <td>@r.Name</td>
+                        <td>
+                            <MudChip T="string" Color="@(r.Pass ? Color.Success : Color.Error)" Size="Size.Small">
+                                @(r.Pass ? "PASS" : "FAIL")
+                            </MudChip>
+                        </td>
+                        <td>@r.Detail</td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+        <MudText Class="mt-3">@_results.Count(r => r.Pass) / @_results.Count passed</MudText>
+    }
+</MudContainer>
+@code {
+    private record TestResult(string Name, bool Pass, string Detail);
+    private List<TestResult> _results = new();
+
+    private void Pass(string name, string detail = "") => _results.Add(new(name, true, detail));
+    private void Fail(string name, string detail)      => _results.Add(new(name, false, detail));
+
+    private static readonly DateTime _testUtc   = new(2024, 6, 15, 10, 30, 0, DateTimeKind.Utc);
+    private static readonly long     _testEpoch = (long)_testUtc.Subtract(DateTime.UnixEpoch).TotalSeconds;
+
+    private async Task RunAll()
+    {
+        _results.Clear();
+        StateHasChanged();
+
+        var conn = new SqliteWasmConnection("TestApp", "TestFile");
+        try
+        {
+            await conn.OpenAsync(default);
+            await Setup(conn);
+            await Test_BoolFalse(conn);
+            await Test_BoolTrue(conn);
+            await Test_DateTimeEpochNumber(conn);
+            await Test_DateTimeEpochString(conn);
+            await Test_DateTimeIso8601(conn);
+            await Test_DateTimeNullable_Null(conn);
+            await Test_DateTimeNullable_Epoch(conn);
+            await Test_DateTimeNullable_Iso(conn);
+            await Test_EntityRoundTrip(conn);
+            await Test_MixedEpochAndIso(conn);
+            await Test_DapperWriteBool(conn);
+        }
+        catch (Exception ex)
+        {
+            Fail("FATAL", $"{ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            await conn.CloseAsync();
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task Setup(SqliteWasmConnection c)
+    {
+        await c.ExecuteAsync("DROP TABLE IF EXISTS type_test");
+        await c.ExecuteAsync(
+            "CREATE TABLE type_test (" +
+            "Id INTEGER PRIMARY KEY, Flag INTEGER NOT NULL, " +
+            "DtNum INTEGER, DtStr TEXT, DtIso TEXT, DtNull INTEGER)");
+    }
+
+    // ── Bool ─────────────────────────────────────────────────────────────────
+
+    private async Task Test_BoolFalse(SqliteWasmConnection c)
+    {
+        const string N = "GetBoolean — INTEGER 0 → false";
+        try
+        {
+            await c.ExecuteAsync("INSERT OR REPLACE INTO type_test (Id, Flag) VALUES (1, 0)");
+            var row = await c.QueryFirstOrDefaultAsync<Row>("SELECT * FROM type_test WHERE Id=1");
+            if (row == null) { Fail(N, "row null"); return; }
+            if (!row.Flag) Pass(N, "✓"); else Fail(N, $"got {row.Flag}");
+        }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_BoolTrue(SqliteWasmConnection c)
+    {
+        const string N = "GetBoolean — INTEGER 1 → true";
+        try
+        {
+            await c.ExecuteAsync("INSERT OR REPLACE INTO type_test (Id, Flag) VALUES (2, 1)");
+            var row = await c.QueryFirstOrDefaultAsync<Row>("SELECT * FROM type_test WHERE Id=2");
+            if (row == null) { Fail(N, "row null"); return; }
+            if (row.Flag) Pass(N, "✓"); else Fail(N, $"got {row.Flag}");
+        }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    // ── DateTime ─────────────────────────────────────────────────────────────
+
+    private async Task Test_DateTimeEpochNumber(SqliteWasmConnection c)
+    {
+        const string N = "GetDateTime — epoch INTEGER → DateTime";
+        try
+        {
+            await c.ExecuteAsync($"INSERT OR REPLACE INTO type_test (Id,Flag,DtNum) VALUES (10,0,{_testEpoch})");
+            var row = await c.QueryFirstOrDefaultAsync<Row>("SELECT * FROM type_test WHERE Id=10");
+            if (row == null) { Fail(N, "row null"); return; }
+            var d = Math.Abs((row.DtNum - _testUtc).TotalSeconds);
+            if (d < 1) Pass(N, $"{row.DtNum:O} ✓"); else Fail(N, $"diff={d:F0}s got={row.DtNum:O}");
+        }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_DateTimeEpochString(SqliteWasmConnection c)
+    {
+        const string N = "GetDateTime — epoch TEXT → DateTime";
+        try
+        {
+            await c.ExecuteAsync($"INSERT OR REPLACE INTO type_test (Id,Flag,DtStr) VALUES (11,0,'{_testEpoch}')");
+            var row = await c.QueryFirstOrDefaultAsync<Row>("SELECT * FROM type_test WHERE Id=11");
+            if (row == null) { Fail(N, "row null"); return; }
+            var d = Math.Abs((row.DtStr - _testUtc).TotalSeconds);
+            if (d < 1) Pass(N, $"{row.DtStr:O} ✓"); else Fail(N, $"diff={d:F0}s got={row.DtStr:O}");
+        }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_DateTimeIso8601(SqliteWasmConnection c)
+    {
+        const string N = "GetDateTime — ISO 8601 TEXT → DateTime";
+        try
+        {
+            var iso = _testUtc.ToString("O");
+            await c.ExecuteAsync($"INSERT OR REPLACE INTO type_test (Id,Flag,DtIso) VALUES (12,0,'{iso}')");
+            var row = await c.QueryFirstOrDefaultAsync<Row>("SELECT * FROM type_test WHERE Id=12");
+            if (row == null) { Fail(N, "row null"); return; }
+            var d = Math.Abs((row.DtIso - _testUtc).TotalSeconds);
+            if (d < 1) Pass(N, $"{row.DtIso:O} ✓"); else Fail(N, $"diff={d:F0}s got={row.DtIso:O}");
+        }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    // ── Nullable DateTime ─────────────────────────────────────────────────────
+
+    private async Task Test_DateTimeNullable_Null(SqliteWasmConnection c)
+    {
+        const string N = "DateTime? — NULL → null";
+        try
+        {
+            await c.ExecuteAsync("INSERT OR REPLACE INTO type_test (Id,Flag,DtNull) VALUES (20,0,NULL)");
+            var row = await c.QueryFirstOrDefaultAsync<Row>("SELECT * FROM type_test WHERE Id=20");
+            if (row == null) { Fail(N, "row null"); return; }
+            if (row.DtNull is null) Pass(N, "null ✓"); else Fail(N, $"got {row.DtNull}");
+        }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_DateTimeNullable_Epoch(SqliteWasmConnection c)
+    {
+        const string N = "DateTime? — epoch INTEGER → DateTime?";
+        try
+        {
+            await c.ExecuteAsync($"INSERT OR REPLACE INTO type_test (Id,Flag,DtNull) VALUES (21,0,{_testEpoch})");
+            var row = await c.QueryFirstOrDefaultAsync<Row>("SELECT * FROM type_test WHERE Id=21");
+            if (row == null) { Fail(N, "row null"); return; }
+            var d = row.DtNull.HasValue ? Math.Abs((row.DtNull.Value - _testUtc).TotalSeconds) : 999;
+            if (d < 1) Pass(N, $"{row.DtNull:O} ✓"); else Fail(N, $"diff={d:F0}s got={row.DtNull}");
+        }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_DateTimeNullable_Iso(SqliteWasmConnection c)
+    {
+        const string N = "DateTime? — ISO 8601 TEXT → DateTime?";
+        try
+        {
+            var iso = _testUtc.ToString("O");
+            await c.ExecuteAsync($"INSERT OR REPLACE INTO type_test (Id,Flag,DtNull) VALUES (22,0,'{iso}')");
+            var row = await c.QueryFirstOrDefaultAsync<Row>("SELECT * FROM type_test WHERE Id=22");
+            if (row == null) { Fail(N, "row null"); return; }
+            var d = row.DtNull.HasValue ? Math.Abs((row.DtNull.Value - _testUtc).TotalSeconds) : 999;
+            if (d < 1) Pass(N, $"{row.DtNull:O} ✓"); else Fail(N, $"diff={d:F0}s got={row.DtNull}");
+        }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    // ── Entity round-trip ─────────────────────────────────────────────────────
+
+    private async Task Test_EntityRoundTrip(SqliteWasmConnection c)
+    {
+        const string N = "Entity round-trip — bool + DateTime write/read";
+        try
+        {
+            await c.ExecuteAsync("DROP TABLE IF EXISTS entity_test");
+            await c.ExecuteAsync("CREATE TABLE entity_test (Id TEXT PRIMARY KEY, IsActive INTEGER, CreatedAt TEXT)");
+            var n = await c.ExecuteAsync(
+                "INSERT OR REPLACE INTO entity_test (Id,IsActive,CreatedAt) VALUES (@Id,@IsActive,@CreatedAt)",
+                new EntityRow { Id = "rt-1", IsActive = true, CreatedAt = _testUtc });
+            // Diagnostics: count + all Ids present
+            var count = await c.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM entity_test");
+            var ids   = string.Join(",", await c.QueryAsync<string>("SELECT Id FROM entity_test"));
+            if (n == 0)   { Fail(N, $"INSERT 0 changes (count={count} ids=[{ids}])"); return; }
+            if (count == 0) { Fail(N, $"n={n} but table empty — insert may have gone to wrong connection"); return; }
+            var r = await c.QueryFirstOrDefaultAsync<EntityRow>("SELECT * FROM entity_test WHERE Id='rt-1'");
+            if (r == null) { Fail(N, $"row null — count={count} ids=[{ids}]"); return; }
+            var dtd = Math.Abs((r.CreatedAt - _testUtc).TotalSeconds);
+            if (r.IsActive && dtd < 2) Pass(N, $"IsActive=true ✓  CreatedAt={r.CreatedAt:O} ✓");
+            else Fail(N, $"IsActive={r.IsActive} dtDiff={dtd:F1}s");
+        }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    // ── Mixed epoch + ISO ─────────────────────────────────────────────────────
+
+    private async Task Test_MixedEpochAndIso(SqliteWasmConnection c)
+    {
+        const string N = "Mixed epoch+ISO in same column — both readable";
+        try
+        {
+            await c.ExecuteAsync("DROP TABLE IF EXISTS mixed_dt");
+            await c.ExecuteAsync("CREATE TABLE mixed_dt (id INTEGER PRIMARY KEY, Ts TEXT)");
+            await c.ExecuteAsync($"INSERT INTO mixed_dt VALUES (1, {_testEpoch})");
+            await c.ExecuteAsync($"INSERT INTO mixed_dt VALUES (2, '{_testUtc:O}')");
+            var rows = (await c.QueryAsync<MixedRow>("SELECT * FROM mixed_dt ORDER BY id")).ToList();
+            if (rows.Count != 2) { Fail(N, $"expected 2 rows, got {rows.Count}"); return; }
+            var d1 = Math.Abs((rows[0].Ts - _testUtc).TotalSeconds);
+            var d2 = Math.Abs((rows[1].Ts - _testUtc).TotalSeconds);
+            if (d1 < 1 && d2 < 1) Pass(N, $"epoch={rows[0].Ts:O} iso={rows[1].Ts:O} ✓");
+            else Fail(N, $"d1={d1:F0}s d2={d2:F0}s");
+        }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    // ── Bool write ────────────────────────────────────────────────────────────
+
+    private async Task Test_DapperWriteBool(SqliteWasmConnection c)
+    {
+        const string N = "Dapper write bool → INTEGER, read back as bool";
+        try
+        {
+            await c.ExecuteAsync("DROP TABLE IF EXISTS bool_write");
+            await c.ExecuteAsync("CREATE TABLE bool_write (id INTEGER PRIMARY KEY, flag INTEGER)");
+
+            // Test anon object
+            await c.ExecuteAsync("INSERT INTO bool_write VALUES (@id,@flag)", new { id = 1, flag = true });
+            await c.ExecuteAsync("INSERT INTO bool_write VALUES (@id,@flag)", new { id = 2, flag = false });
+
+            // Dump raw row 1 — enumerate every key+type+value
+            var raw = (await c.QueryAsync<dynamic>("SELECT * FROM bool_write ORDER BY id")).ToList();
+            if (raw.Count == 0) { Fail(N, "no rows"); return; }
+            var d0 = (IDictionary<string, object>)raw[0];
+            var dump = string.Join(" | ", d0.Select(kv =>
+                $"{kv.Key}={kv.Value?.GetType().Name ?? "null"}:{kv.Value}"));
+
+            var flagKey = d0.Keys.FirstOrDefault(k => k.Equals("flag", StringComparison.OrdinalIgnoreCase));
+            if (flagKey == null) { Fail(N, $"flag key missing; dump={dump}"); return; }
+            var stored = d0[flagKey];
+            // JS numbers are float64 — Convert.ToBoolean handles long, int, double uniformly
+            var storedIsOne = stored != null && Convert.ToBoolean(stored);
+
+            if (!storedIsOne) { Fail(N, $"not numeric 1; dump={dump}"); return; }
+
+            // Typed read
+            var typed = (await c.QueryAsync<BoolRow>("SELECT * FROM bool_write ORDER BY id")).ToList();
+            if (typed[0].Flag && !typed[1].Flag) Pass(N, $"raw={stored}({stored?.GetType().Name}) ✓  typed=true/false ✓");
+            else Fail(N, $"typed[0]={typed[0].Flag} typed[1]={typed[1].Flag}; dump={dump}");
+        }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    // ── Row models ────────────────────────────────────────────────────────────
+
+    private class Row
+    {
+        public int       Id     { get; set; }
+        public bool      Flag   { get; set; }
+        public DateTime  DtNum  { get; set; }
+        public DateTime  DtStr  { get; set; }
+        public DateTime  DtIso  { get; set; }
+        public DateTime? DtNull { get; set; }
+    }
+
+    private class EntityRow
+    {
+        public string   Id        { get; set; } = "";
+        public bool     IsActive  { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    private class MixedRow { public int Id { get; set; } public DateTime Ts { get; set; } }
+    private class BoolRow  { public int Id { get; set; } public bool Flag   { get; set; } }
+}

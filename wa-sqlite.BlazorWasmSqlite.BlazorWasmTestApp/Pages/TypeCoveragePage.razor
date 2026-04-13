@@ -1,0 +1,447 @@
+@page "/type-coverage"
+@using Dapper
+@using wa_sqlite.BlazorWasmSqlite
+@using wa_sqlite.BlazorWasmSqlite.DBConnection
+@using System.Linq
+
+<PageTitle>Primitive Type Coverage</PageTitle>
+
+<MudContainer>
+    <MudText Typo="Typo.h5" Class="mb-2">SqliteWasmConnection — Primitive Type Coverage</MudText>
+    <MudText Typo="Typo.body2" Class="mb-4" Color="Color.Secondary">
+        Two rows: row 1 = all values populated, row 2 = all nullable columns NULL.
+        DateTime/DateTime? handlers registered; all others raw.
+    </MudText>
+
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="RunAll" Class="mb-4">
+        Run All Tests
+    </MudButton>
+
+    @if (_results.Any())
+    {
+        <MudSimpleTable Dense="true" Striped="true">
+            <thead><tr><th>Test</th><th>Result</th><th>Detail</th></tr></thead>
+            <tbody>
+                @foreach (var r in _results)
+                {
+                    <tr>
+                        <td>@r.Name</td>
+                        <td>
+                            <MudChip T="string" Color="@(r.Pass ? Color.Success : Color.Error)" Size="Size.Small">
+                                @(r.Pass ? "PASS" : "FAIL")
+                            </MudChip>
+                        </td>
+                        <td style="font-family:monospace;font-size:0.8em">@r.Detail</td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+        <MudText Class="mt-3">@_results.Count(r => r.Pass) / @_results.Count passed</MudText>
+    }
+</MudContainer>
+@code {
+    private record TestResult(string Name, bool Pass, string Detail);
+    private List<TestResult> _results = new();
+
+    private void Pass(string name, string detail = "") => _results.Add(new(name, true, detail));
+    private void Fail(string name, string detail)      => _results.Add(new(name, false, detail));
+
+    // ── Fixed test values ────────────────────────────────────────────────────
+
+    private static readonly Guid     _guid    = new("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+    private static readonly DateTime _dt      = new(2024, 6, 15, 10, 30, 0, DateTimeKind.Utc);
+    private static readonly string   _dtIso   = _dt.ToString("O");
+
+    // ── Entry point ──────────────────────────────────────────────────────────
+
+    private async Task RunAll()
+    {
+        _results.Clear();
+        StateHasChanged();
+
+        var conn = new SqliteWasmConnection("TestApp", "TestFile");
+        try
+        {
+            await conn.OpenAsync(default);
+            await Setup(conn);
+            await InsertRows(conn);
+
+            // Non-nullable round-trips (row 1)
+            await Test_Bool_True(conn);
+            await Test_Bool_False(conn);
+            await Test_Int(conn);
+            await Test_Long(conn);
+            await Test_Float(conn);
+            await Test_Double(conn);
+            await Test_Decimal(conn);
+            await Test_DateTime(conn);
+            await Test_String(conn);
+            await Test_Guid(conn);
+
+            // Nullable populated (row 1)
+            await Test_NullableBool_Value(conn);
+            await Test_NullableInt_Value(conn);
+            await Test_NullableLong_Value(conn);
+            await Test_NullableFloat_Value(conn);
+            await Test_NullableDouble_Value(conn);
+            await Test_NullableDecimal_Value(conn);
+            await Test_NullableDateTime_Value(conn);
+            await Test_NullableString_Value(conn);
+            await Test_NullableGuid_Value(conn);
+
+            // Nullable null (row 2)
+            await Test_NullableBool_Null(conn);
+            await Test_NullableInt_Null(conn);
+            await Test_NullableDecimal_Null(conn);
+            await Test_NullableDateTime_Null(conn);
+            await Test_NullableGuid_Null(conn);
+            await Test_NullableString_Null(conn);
+        }
+        catch (Exception ex)
+        {
+            Fail("FATAL", $"{ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            await conn.CloseAsync();
+        }
+
+        StateHasChanged();
+    }
+
+    // ── Setup & insert ───────────────────────────────────────────────────────
+
+    private async Task Setup(SqliteWasmConnection c)
+    {
+        await c.ExecuteAsync("DROP TABLE IF EXISTS type_coverage");
+        await c.ExecuteAsync(@"
+            CREATE TABLE type_coverage (
+                Id             INTEGER PRIMARY KEY,
+                BoolVal        INTEGER NOT NULL,
+                IntVal         INTEGER NOT NULL,
+                LongVal        INTEGER NOT NULL,
+                FloatVal       REAL    NOT NULL,
+                DoubleVal      REAL    NOT NULL,
+                DecimalVal     NUMERIC NOT NULL,
+                DateTimeVal    TEXT    NOT NULL,
+                StringVal      TEXT    NOT NULL,
+                GuidVal        TEXT    NOT NULL,
+                NullableBool   INTEGER,
+                NullableInt    INTEGER,
+                NullableLong   INTEGER,
+                NullableFloat  REAL,
+                NullableDouble REAL,
+                NullableDecimal NUMERIC,
+                NullableDateTime TEXT,
+                NullableString TEXT,
+                NullableGuid   TEXT
+            )");
+    }
+
+    private async Task InsertRows(SqliteWasmConnection c)
+    {
+        // Row 1: all values populated
+        await c.ExecuteAsync(@"
+            INSERT INTO type_coverage VALUES (
+                @Id, @BoolVal, @IntVal, @LongVal, @FloatVal, @DoubleVal,
+                @DecimalVal, @DateTimeVal, @StringVal, @GuidVal,
+                @NullableBool, @NullableInt, @NullableLong, @NullableFloat,
+                @NullableDouble, @NullableDecimal, @NullableDateTime,
+                @NullableString, @NullableGuid
+            )", new TypeCoverageRecord
+            {
+                Id              = 1,
+                BoolVal         = true,
+                IntVal          = 42,
+                LongVal         = 1_234_567_890_123L,
+                FloatVal        = 3.14f,
+                DoubleVal       = 2.718281828,
+                DecimalVal      = 123.456m,
+                DateTimeVal     = _dt,
+                StringVal       = "hello sqlite",
+                GuidVal         = _guid,
+                NullableBool    = false,
+                NullableInt     = 99,
+                NullableLong    = 9_876_543_210L,
+                NullableFloat   = 1.5f,
+                NullableDouble  = 0.577215664,
+                NullableDecimal = 0.001m,
+                NullableDateTime = _dt,
+                NullableString  = "nullable string",
+                NullableGuid    = _guid,
+            });
+
+        // Row 2: non-nullables populated, all nullable columns NULL
+        await c.ExecuteAsync(@"
+            INSERT INTO type_coverage (
+                Id, BoolVal, IntVal, LongVal, FloatVal, DoubleVal,
+                DecimalVal, DateTimeVal, StringVal, GuidVal
+            ) VALUES (
+                @Id, @BoolVal, @IntVal, @LongVal, @FloatVal, @DoubleVal,
+                @DecimalVal, @DateTimeVal, @StringVal, @GuidVal
+            )", new
+            {
+                Id          = 2,
+                BoolVal     = false,
+                IntVal      = 0,
+                LongVal     = 0L,
+                FloatVal    = 0f,
+                DoubleVal   = 0.0,
+                DecimalVal  = 0m,
+                DateTimeVal = _dtIso,
+                StringVal   = "",
+                GuidVal     = _guid.ToString(),
+            });
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private async Task<TypeCoverageRecord?> Row1(SqliteWasmConnection c) =>
+        await c.QueryFirstOrDefaultAsync<TypeCoverageRecord>(
+            "SELECT * FROM type_coverage WHERE Id = 1");
+
+    private async Task<TypeCoverageRecord?> Row2(SqliteWasmConnection c) =>
+        await c.QueryFirstOrDefaultAsync<TypeCoverageRecord>(
+            "SELECT * FROM type_coverage WHERE Id = 2");
+
+    // ── Non-nullable tests ───────────────────────────────────────────────────
+
+    private async Task Test_Bool_True(SqliteWasmConnection c)
+    {
+        const string N = "bool — INTEGER 1 → true";
+        try { var r = await Row1(c); if (r == null) { Fail(N,"row null"); return; }
+              if (r.BoolVal) Pass(N,"✓"); else Fail(N,$"got {r.BoolVal}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_Bool_False(SqliteWasmConnection c)
+    {
+        const string N = "bool — INTEGER 0 → false";
+        try { var r = await Row2(c); if (r == null) { Fail(N,"row null"); return; }
+              if (!r.BoolVal) Pass(N,"✓"); else Fail(N,$"got {r.BoolVal}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_Int(SqliteWasmConnection c)
+    {
+        const string N = "int — 42";
+        try { var r = await Row1(c); if (r == null) { Fail(N,"row null"); return; }
+              if (r.IntVal == 42) Pass(N,"✓"); else Fail(N,$"got {r.IntVal}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_Long(SqliteWasmConnection c)
+    {
+        const string N = "long — 1_234_567_890_123";
+        try { var r = await Row1(c); if (r == null) { Fail(N,"row null"); return; }
+              if (r.LongVal == 1_234_567_890_123L) Pass(N,"✓"); else Fail(N,$"got {r.LongVal}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_Float(SqliteWasmConnection c)
+    {
+        const string N = "float — 3.14f";
+        try { var r = await Row1(c); if (r == null) { Fail(N,"row null"); return; }
+              if (Math.Abs(r.FloatVal - 3.14f) < 0.001f) Pass(N,$"{r.FloatVal} ✓"); else Fail(N,$"got {r.FloatVal}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_Double(SqliteWasmConnection c)
+    {
+        const string N = "double — 2.718281828";
+        try { var r = await Row1(c); if (r == null) { Fail(N,"row null"); return; }
+              if (Math.Abs(r.DoubleVal - 2.718281828) < 1e-9) Pass(N,$"{r.DoubleVal} ✓"); else Fail(N,$"got {r.DoubleVal}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_Decimal(SqliteWasmConnection c)
+    {
+        const string N = "decimal — 123.456m";
+        try { var r = await Row1(c); if (r == null) { Fail(N,"row null"); return; }
+              if (r.DecimalVal == 123.456m) Pass(N,$"{r.DecimalVal} ✓"); else Fail(N,$"got {r.DecimalVal}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_DateTime(SqliteWasmConnection c)
+    {
+        const string N = "DateTime — ISO 8601 round-trip";
+        try { var r = await Row1(c); if (r == null) { Fail(N,"row null"); return; }
+              var diff = Math.Abs((r.DateTimeVal - _dt).TotalSeconds);
+              if (diff < 1) Pass(N,$"{r.DateTimeVal:O} ✓"); else Fail(N,$"diff={diff:F1}s got={r.DateTimeVal:O}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_String(SqliteWasmConnection c)
+    {
+        const string N = "string — \"hello sqlite\"";
+        try { var r = await Row1(c); if (r == null) { Fail(N,"row null"); return; }
+              if (r.StringVal == "hello sqlite") Pass(N,"✓"); else Fail(N,$"got \"{r.StringVal}\""); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_Guid(SqliteWasmConnection c)
+    {
+        const string N = "Guid — TEXT round-trip";
+        try { var r = await Row1(c); if (r == null) { Fail(N,"row null"); return; }
+              if (r.GuidVal == _guid) Pass(N,$"{r.GuidVal} ✓"); else Fail(N,$"got {r.GuidVal}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    // ── Nullable populated tests (row 1) ─────────────────────────────────────
+
+    private async Task Test_NullableBool_Value(SqliteWasmConnection c)
+    {
+        const string N = "bool? — has value → false";
+        try { var r = await Row1(c); if (r == null) { Fail(N,"row null"); return; }
+              if (r.NullableBool.HasValue && !r.NullableBool.Value) Pass(N,"✓");
+              else Fail(N,$"got {r.NullableBool?.ToString() ?? "null"}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_NullableInt_Value(SqliteWasmConnection c)
+    {
+        const string N = "int? — has value → 99";
+        try { var r = await Row1(c); if (r == null) { Fail(N,"row null"); return; }
+              if (r.NullableInt == 99) Pass(N,"✓"); else Fail(N,$"got {r.NullableInt?.ToString() ?? "null"}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_NullableLong_Value(SqliteWasmConnection c)
+    {
+        const string N = "long? — has value → 9_876_543_210";
+        try { var r = await Row1(c); if (r == null) { Fail(N,"row null"); return; }
+              if (r.NullableLong == 9_876_543_210L) Pass(N,"✓"); else Fail(N,$"got {r.NullableLong?.ToString() ?? "null"}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_NullableFloat_Value(SqliteWasmConnection c)
+    {
+        const string N = "float? — has value → 1.5f";
+        try { var r = await Row1(c); if (r == null) { Fail(N,"row null"); return; }
+              if (r.NullableFloat.HasValue && Math.Abs(r.NullableFloat.Value - 1.5f) < 0.001f)
+                  Pass(N,$"{r.NullableFloat} ✓");
+              else Fail(N,$"got {r.NullableFloat?.ToString() ?? "null"}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_NullableDouble_Value(SqliteWasmConnection c)
+    {
+        const string N = "double? — has value → 0.577215664";
+        try { var r = await Row1(c); if (r == null) { Fail(N,"row null"); return; }
+              if (r.NullableDouble.HasValue && Math.Abs(r.NullableDouble.Value - 0.577215664) < 1e-9)
+                  Pass(N,$"{r.NullableDouble} ✓");
+              else Fail(N,$"got {r.NullableDouble?.ToString() ?? "null"}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_NullableDecimal_Value(SqliteWasmConnection c)
+    {
+        const string N = "decimal? — has value → 0.001m";
+        try { var r = await Row1(c); if (r == null) { Fail(N,"row null"); return; }
+              if (r.NullableDecimal == 0.001m) Pass(N,$"{r.NullableDecimal} ✓");
+              else Fail(N,$"got {r.NullableDecimal?.ToString() ?? "null"}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_NullableDateTime_Value(SqliteWasmConnection c)
+    {
+        const string N = "DateTime? — has value";
+        try { var r = await Row1(c); if (r == null) { Fail(N,"row null"); return; }
+              var diff = r.NullableDateTime.HasValue
+                  ? Math.Abs((r.NullableDateTime.Value - _dt).TotalSeconds) : 999;
+              if (diff < 1) Pass(N,$"{r.NullableDateTime:O} ✓"); else Fail(N,$"got {r.NullableDateTime?.ToString() ?? "null"}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_NullableString_Value(SqliteWasmConnection c)
+    {
+        const string N = "string? — has value → \"nullable string\"";
+        try { var r = await Row1(c); if (r == null) { Fail(N,"row null"); return; }
+              if (r.NullableString == "nullable string") Pass(N,"✓"); else Fail(N,$"got \"{r.NullableString}\""); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_NullableGuid_Value(SqliteWasmConnection c)
+    {
+        const string N = "Guid? — has value";
+        try { var r = await Row1(c); if (r == null) { Fail(N,"row null"); return; }
+              if (r.NullableGuid == _guid) Pass(N,$"{r.NullableGuid} ✓"); else Fail(N,$"got {r.NullableGuid?.ToString() ?? "null"}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    // ── Nullable null tests (row 2) ───────────────────────────────────────────
+
+    private async Task Test_NullableBool_Null(SqliteWasmConnection c)
+    {
+        const string N = "bool? — NULL → null";
+        try { var r = await Row2(c); if (r == null) { Fail(N,"row null"); return; }
+              if (!r.NullableBool.HasValue) Pass(N,"null ✓"); else Fail(N,$"got {r.NullableBool}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_NullableInt_Null(SqliteWasmConnection c)
+    {
+        const string N = "int? — NULL → null";
+        try { var r = await Row2(c); if (r == null) { Fail(N,"row null"); return; }
+              if (!r.NullableInt.HasValue) Pass(N,"null ✓"); else Fail(N,$"got {r.NullableInt}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_NullableDecimal_Null(SqliteWasmConnection c)
+    {
+        const string N = "decimal? — NULL → null";
+        try { var r = await Row2(c); if (r == null) { Fail(N,"row null"); return; }
+              if (!r.NullableDecimal.HasValue) Pass(N,"null ✓"); else Fail(N,$"got {r.NullableDecimal}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_NullableDateTime_Null(SqliteWasmConnection c)
+    {
+        const string N = "DateTime? — NULL → null";
+        try { var r = await Row2(c); if (r == null) { Fail(N,"row null"); return; }
+              if (!r.NullableDateTime.HasValue) Pass(N,"null ✓"); else Fail(N,$"got {r.NullableDateTime}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_NullableGuid_Null(SqliteWasmConnection c)
+    {
+        const string N = "Guid? — NULL → null";
+        try { var r = await Row2(c); if (r == null) { Fail(N,"row null"); return; }
+              if (!r.NullableGuid.HasValue) Pass(N,"null ✓"); else Fail(N,$"got {r.NullableGuid}"); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    private async Task Test_NullableString_Null(SqliteWasmConnection c)
+    {
+        const string N = "string? — NULL → null";
+        try { var r = await Row2(c); if (r == null) { Fail(N,"row null"); return; }
+              if (r.NullableString is null) Pass(N,"null ✓"); else Fail(N,$"got \"{r.NullableString}\""); }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    // ── Model ─────────────────────────────────────────────────────────────────
+
+    private class TypeCoverageRecord
+    {
+        public int      Id              { get; set; }
+        public bool     BoolVal         { get; set; }
+        public int      IntVal          { get; set; }
+        public long     LongVal         { get; set; }
+        public float    FloatVal        { get; set; }
+        public double   DoubleVal       { get; set; }
+        public decimal  DecimalVal      { get; set; }
+        public DateTime DateTimeVal     { get; set; }
+        public string   StringVal       { get; set; } = "";
+        public Guid     GuidVal         { get; set; }
+
+        public bool?     NullableBool     { get; set; }
+        public int?      NullableInt      { get; set; }
+        public long?     NullableLong     { get; set; }
+        public float?    NullableFloat    { get; set; }
+        public double?   NullableDouble   { get; set; }
+        public decimal?  NullableDecimal  { get; set; }
+        public DateTime? NullableDateTime { get; set; }
+        public string?   NullableString   { get; set; }
+        public Guid?     NullableGuid     { get; set; }
+    }
+}
