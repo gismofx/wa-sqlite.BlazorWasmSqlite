@@ -14,8 +14,15 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Dapper" Version="2.0.0" />
+    <PackageReference Include="Dapper" Version="2.1.72" />
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="8.0.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Exposes internal members (Coerce, etc.) for direct unit testing -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>wa-sqlite.BlazorWasmSqlite.Tests</_Parameter1>
+    </AssemblyAttribute>
   </ItemGroup>
 	
 	<PropertyGroup>

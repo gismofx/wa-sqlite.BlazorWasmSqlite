@@ -159,11 +159,24 @@ public sealed class SqliteWasmCommand : DbCommand
         return result;
     }
 
-    private static object? Coerce(object? value)
+    /// <summary>
+    /// Converts a parameter value to a JSON-serializable form for the wa-sqlite JS worker.
+    /// This is the production serialization path for all query parameters — Dapper's type
+    /// handler SetValue is bypassed for built-in types (DateTime, bool) because SqliteWasmParameter
+    /// holds the raw CLR value, which flows directly here.
+    ///
+    /// DateTime: serialized as sortable ISO 8601 ("s" format, no timezone suffix) — identical
+    /// to what DateTimeHandler.SetValue writes, ensuring parameter/stored-value format consistency
+    /// and correct lexicographic date-range query results.
+    ///
+    /// Internal (not private) to allow direct unit testing via InternalsVisibleTo.
+    /// </summary>
+    internal static object? Coerce(object? value)
     {
         if (value is null || value is DBNull) return null;
-        if (value is bool b)      return b ? 1 : 0;
-        if (value is DateTime dt) return dt.ToString("O");
+        if (value is bool b)             return b ? 1 : 0;
+        if (value is DateTime dt)        return dt.ToString("s");
+        if (value is DateTimeOffset dto) return dto.ToUniversalTime().ToString("s") + "Z";
         return value;
     }
 

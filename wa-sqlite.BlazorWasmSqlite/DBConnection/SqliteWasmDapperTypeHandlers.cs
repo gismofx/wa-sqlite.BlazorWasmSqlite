@@ -15,8 +15,8 @@ namespace wa_sqlite.BlazorWasmSqlite;
 /// require their own explicit handler or Dapper's IL deserializer throws InvalidCastException.
 ///
 /// Handlers registered:
-///   DateTime / DateTime?        — epoch int, epoch string, ISO 8601 → DateTime; writes ISO 8601
-///   DateTimeOffset / DateTimeOffset? — ISO 8601 with offset → DateTimeOffset; writes ISO 8601 with offset
+///   DateTime / DateTime?        — epoch int, epoch string, ISO 8601 → DateTime; writes sortable ISO 8601 ("s" format, no timezone suffix)
+///   DateTimeOffset / DateTimeOffset? — ISO 8601 → DateTimeOffset; writes UTC-normalized ISO 8601 ("s" format + "Z")
 ///   bool / bool?                — Double 0.0/1.0 → bool; writes 0/1
 ///   Guid / Guid?          — String → Guid.Parse; writes ToString()
 ///   decimal / decimal?    — Double → Convert.ToDecimal
@@ -71,7 +71,10 @@ public static class SqliteWasmDapperTypeHandlers
             return DateTime.Parse(s, null, DateTimeStyles.RoundtripKind);
         }
         public override void SetValue(IDbDataParameter parameter, DateTime value)
-            => parameter.Value = value.ToString("O");
+            // "s" format: sortable ISO 8601 without timezone suffix (e.g. "2024-06-15T10:30:00").
+            // Kind-agnostic — stores wall-clock value as entered, no UTC conversion.
+            // Lexicographic sort == chronological sort; safe for SQLite date-range queries.
+            => parameter.Value = value.ToString("s");
     }
 
     private sealed class NullableDateTimeHandler : SqlMapper.TypeHandler<DateTime?>
@@ -85,7 +88,7 @@ public static class SqliteWasmDapperTypeHandlers
             return DateTime.Parse(s, null, DateTimeStyles.RoundtripKind);
         }
         public override void SetValue(IDbDataParameter parameter, DateTime? value)
-            => parameter.Value = value.HasValue ? (object)value.Value.ToString("O") : DBNull.Value;
+            => parameter.Value = value.HasValue ? (object)value.Value.ToString("s") : DBNull.Value;
     }
 
     // ── DateTimeOffset ────────────────────────────────────────────────────────
@@ -101,7 +104,9 @@ public static class SqliteWasmDapperTypeHandlers
             return DateTimeOffset.Parse(s, null, DateTimeStyles.RoundtripKind);
         }
         public override void SetValue(IDbDataParameter parameter, DateTimeOffset value)
-            => parameter.Value = value.ToString("O");
+            // Normalize to UTC and store as sortable ISO 8601 + "Z" suffix (e.g. "2024-06-15T10:30:00Z").
+            // The original offset is intentionally discarded — only the instant is preserved.
+            => parameter.Value = value.ToUniversalTime().ToString("s") + "Z";
     }
 
     private sealed class NullableDateTimeOffsetHandler : SqlMapper.TypeHandler<DateTimeOffset?>
@@ -115,7 +120,7 @@ public static class SqliteWasmDapperTypeHandlers
             return DateTimeOffset.Parse(s, null, DateTimeStyles.RoundtripKind);
         }
         public override void SetValue(IDbDataParameter parameter, DateTimeOffset? value)
-            => parameter.Value = value.HasValue ? (object)value.Value.ToString("O") : DBNull.Value;
+            => parameter.Value = value.HasValue ? (object)(value.Value.ToUniversalTime().ToString("s") + "Z") : DBNull.Value;
     }
 
     // ── Bool ─────────────────────────────────────────────────────────────────

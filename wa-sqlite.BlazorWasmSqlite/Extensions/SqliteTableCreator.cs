@@ -61,6 +61,32 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
         public static List<string> GenerateSqliteCreateTable<T>() => GenerateSqliteCreateTable(typeof(T));
 
         /// <summary>
+        /// Builds a column definition fragment suitable for use in <c>ALTER TABLE ADD COLUMN</c>.
+        /// Unlike <see cref="ColumnCreate"/>, this omits <c>PRIMARY KEY</c> and <c>UNIQUE</c>
+        /// clauses because SQLite's ALTER TABLE ADD COLUMN does not support them.
+        /// <c>COLLATE NOCASE</c> is included for TEXT columns that do not opt into case-sensitive
+        /// comparison — SQLite supports collation on added columns.
+        /// </summary>
+        public static string BuildAlterColumnDefinition(PropertyInfo prop)
+        {
+            var att = GetSqliteColumnAttributeOrDefault(prop);
+
+            var collate = att.ColumnType == SqliteType.Text && !att.CaseSensitive ? "COLLATE NOCASE" : string.Empty;
+            var notNull = att.Nullability == SqliteNullability.NotNull ? "NOT NULL" : string.Empty;
+
+            var defaultClause = string.Empty;
+            if (att.Nullability == SqliteNullability.NotNull)
+            {
+                var defaultVal = att.DefaultValue ?? InferDefaultValue(prop.PropertyType);
+                if (defaultVal != null) defaultClause = $"DEFAULT {defaultVal}";
+            }
+
+            var parts = new[] { prop.Name, att.ColumnType, collate, notNull, defaultClause }
+                .Where(p => !string.IsNullOrEmpty(p));
+            return string.Join(" ", parts);
+        }
+
+        /// <summary>
         /// Builds a single column definition fragment for use in CREATE TABLE or ALTER TABLE DDL.
         /// </summary>
         private static string ColumnCreate(PropertyInfo prop)
