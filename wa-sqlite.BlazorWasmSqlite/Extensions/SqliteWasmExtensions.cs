@@ -334,7 +334,6 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
         /// <param name="records">Entities to upsert. Must be non-empty.</param>
         /// <param name="primaryKey">Primary key column name (default <c>"Id"</c>).</param>
         /// <param name="rowsPerStatement">Rows per INSERT statement (default 100).</param>
-        /// <param name="options">Optional JSON serializer options.</param>
         /// <param name="ct">Cancellation token.</param>
         /// <returns>Total rows affected.</returns>
         public static async Task<int> UpsertAsync<T>(
@@ -343,11 +342,10 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             IEnumerable<T> records,
             string primaryKey = "Id",
             int rowsPerStatement = 100,
-            JsonSerializerOptions? options = null,
             CancellationToken ct = default)
         {
             var payload = SqliteWorkerPayloadBuilder.BuildUpsertPayload(
-                tableName, records, primaryKey, rowsPerStatement, options);
+                tableName, records, primaryKey, rowsPerStatement);
             using var result = await SqliteJsInterop.BulkInsertRawUpsertAsync(
                 connection.ConnectionHandle, payload);
             return result != null

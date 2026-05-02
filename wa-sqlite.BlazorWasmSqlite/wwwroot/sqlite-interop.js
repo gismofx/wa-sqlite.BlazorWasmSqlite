@@ -82,6 +82,21 @@ export async function bulkInsertRawUpsert(dbConn, payload) {
 }
 
 /**
+ * Check whether an IndexedDB database with the given name exists.
+ * Uses indexedDB.databases() — supported on Safari 14+, Chrome 71+, Firefox 72+.
+ * Call before open() to detect legacy vs migrated database state without
+ * relying on LocalStorage flags.
+ * @param {string} fileName - IDB database name (matches the fileName passed to open())
+ * @returns {Promise<boolean>} true if the database exists, false otherwise
+ */
+export async function checkDatabaseExists(fileName) {
+    const dbs = await indexedDB.databases();
+    const names = dbs.map(db => db.name);
+    console.debug('[sqlite-interop] checkDatabaseExists: looking for "' + fileName + '", found IDBs:', names);
+    return names.some(name => name === fileName);
+}
+
+/**
  * Delete an IndexedDB database by name.
  * Does NOT go through the Worker — this is a browser-level IDB operation.
  * The caller must close any open SqliteWasmConnection for this fileName first.

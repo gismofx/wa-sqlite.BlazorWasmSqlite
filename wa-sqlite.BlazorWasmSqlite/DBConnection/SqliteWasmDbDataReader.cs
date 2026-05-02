@@ -161,7 +161,19 @@ internal sealed class SqliteWasmDbDataReader : DbDataReader
         var root = doc.RootElement;
         var error = root.GetProperty("error").GetString();
         if (!string.IsNullOrEmpty(error))
-            throw new Exception($"SQLite query error: {error}");
+        {
+            // Include the SQL from the error payload when available so the exception
+            // message surfaces the failing statement rather than just the SQLite error code.
+            string? sql = null;
+            if (root.TryGetProperty("sql", out var sqlEl))
+                sql = sqlEl.GetString();
+
+            var message = string.IsNullOrEmpty(sql)
+                ? $"SQLite error: {error}"
+                : $"SQLite error: {error} | SQL: {sql}";
+
+            throw new InvalidOperationException(message);
+        }
 
         var dataArray = root.GetProperty("data");
         var rows = new List<Dictionary<string, JsonElement>>();

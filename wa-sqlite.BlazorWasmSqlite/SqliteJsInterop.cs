@@ -135,11 +135,23 @@ public static partial class SqliteJsInterop
         int dbConn, string payload);
 
     /// <summary>
+    /// Returns true if an IndexedDB database with the given fileName exists.
+    /// Uses <c>indexedDB.databases()</c> — requires Safari 14+, Chrome 71+, Firefox 72+.
+    /// Call before <see cref="OpenAsync"/> to select the correct database name without
+    /// relying on LocalStorage flags. The presence (or absence) of the legacy database
+    /// IS the migration flag — no external state required.
+    /// </summary>
+    /// <param name="fileName">IDB database name — the same fileName passed to <see cref="OpenAsync"/>.</param>
+    [JSImport("checkDatabaseExists", ModuleName)]
+    public static partial Task<bool> CheckDatabaseExistsAsync(string fileName);
+
+    /// <summary>
     /// Delete an IndexedDB database by name.
     /// Does NOT go through the Worker — this is a browser-level IDB operation.
     /// The caller must close any open <see cref="DBConnection.SqliteWasmConnection"/>
     /// for this fileName before calling, or the delete will be blocked.
-    /// After deletion, clear any local version flags (e.g. LocalStorage) and reload.
+    /// After deletion, reload the page — <see cref="CheckDatabaseExistsAsync"/> will
+    /// return false and the new database name will be selected automatically.
     /// </summary>
     /// <param name="fileName">IDB database name — the same fileName passed to <see cref="OpenAsync"/>.</param>
     [JSImport("deleteDatabase", ModuleName)]

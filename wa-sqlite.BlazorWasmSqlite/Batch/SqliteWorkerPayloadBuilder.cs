@@ -5,6 +5,7 @@ using System.Linq;
 using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
+using wa_sqlite.BlazorWasmSqlite.JsonConverters;
 
 namespace wa_sqlite.BlazorWasmSqlite.Batch;
 
@@ -46,6 +47,31 @@ public static class SqliteWorkerPayloadBuilder
     /// does not implement value equality, making it unsuitable as a composite cache key.
     /// </remarks>
     private static readonly ConcurrentDictionary<Type, string[]> ColumnCache = new();
+
+    /// <summary>
+    /// Default <see cref="JsonSerializerOptions"/> for <see cref="BuildUpsertPayload{T}"/>.
+    /// Matches the Dapper <c>SetValue</c> contract for every type handled by
+    /// <see cref="SqliteWasmDapperTypeHandlers"/>:
+    /// <list type="bullet">
+    ///   <item><c>bool</c> → 1/0</item>
+    ///   <item><c>bool?</c> → 1/0/null</item>
+    ///   <item><c>DateTime</c> / <c>DateTime?</c> → sortable ISO 8601 ("s" format, no TZ suffix)</item>
+    ///   <item><c>DateTimeOffset</c> / <c>DateTimeOffset?</c> → UTC-normalized ISO 8601 + "Z"</item>
+    ///   <item><c>Guid</c>, <c>string</c>, numerics → STJ defaults (correct for SQLite)</item>
+    /// </list>
+    /// </summary>
+    public static readonly JsonSerializerOptions DefaultOptions = new JsonSerializerOptions
+    {
+        Converters =
+        {
+            new BooleanConvertor(),
+            new SqliteNullableBoolWriteConverter(),
+            new SqliteDateTimeWriteConverter(),
+            new SqliteNullableDateTimeWriteConverter(),
+            new SqliteDateTimeOffsetWriteConverter(),
+            new SqliteNullableDateTimeOffsetWriteConverter(),
+        }
+    };
 
     /// <summary>
     /// Builds a <c>\0</c>-delimited payload from raw NDJSON seed stream lines.
@@ -100,66 +126,33 @@ public static class SqliteWorkerPayloadBuilder
     /// (<c>INSERT INTO ... ON CONFLICT DO UPDATE SET</c> — preserves existing row data).
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// Each entity is serialized to a plain JSON object string via
-    /// <see cref="JsonSerializer.Serialize{T}(T, JsonSerializerOptions?)"/>.
-    /// No NDJSON envelope is required — the Worker reads each line as a raw object.
-    /// </para>
-    /// <para>
-    /// Column names are derived from the JSON property names of the first entity.
-    /// Ensure <typeparamref name="T"/> serializes consistently (consider
-    /// <see cref="System.Text.Json.Serialization.JsonPropertyNameAttribute"/> if needed).
-    /// </para>
+    /// Each entity is serialized via <see cref="DefaultOptions"/>, which ensures
+    /// <c>bool</c>, <c>DateTime</c>, <c>DateTimeOffset</c>, and nullable variants
+    /// are written in formats that round-trip correctly through the Worker and back
+    /// via Dapper reads. Column names are cached per type after the first call.
     /// </remarks>
-    /// <typeparam name="T">Entity type. Must serialize to a flat JSON object.</typeparam>
-    /// <param name="tableName">Target SQLite table name.</param>
-    /// <param name="records">Entities to upsert. Must be non-empty.</param>
-    /// <param name="primaryKey">Primary key column name (default <c>"Id"</c>).</param>
-    /// <param name="rowsPerStatement">Number of rows per INSERT statement (default 100).</param>
-    /// <param name="options">Optional JSON serializer options.</param>
-    /// <returns>
-    /// <c>\0</c>-delimited payload string ready to pass to
-    /// <see cref="SqliteJsInterop.BulkInsertRawUpsertAsync"/>.
-    /// </returns>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="records"/> is empty.</exception>
     public static string BuildUpsertPayload<T>(
         string tableName,
         IEnumerable<T> records,
         string primaryKey = "Id",
-        int rowsPerStatement = 100,
-        JsonSerializerOptions? options = null)
+        int rowsPerStatement = 100)
     {
         var list = records as IReadOnlyList<T> ?? records.ToList();
         if (list.Count == 0)
             throw new ArgumentException("records must be non-empty.", nameof(records));
 
-        // Serialize all entities first — unavoidable per-call cost.
         var lines = new List<string>(list.Count);
         foreach (var entity in list)
-            lines.Add(JsonSerializer.Serialize(entity, options));
+            lines.Add(JsonSerializer.Serialize(entity, DefaultOptions));
 
-        // Column discovery: use cache when options == null (common case).
-        // JsonSerializerOptions lacks value equality so cannot be used as a composite key.
-        // Custom-options callers pay the JsonDocument.Parse cost on every call — acceptable
-        // since custom options are rare and the caller has opted into non-default behaviour.
-        string[] columns;
-        if (options == null)
-        {
-            columns = ColumnCache.GetOrAdd(typeof(T), _ =>
-            {
-                using var doc = JsonDocument.Parse(lines[0]);
-                return doc.RootElement.EnumerateObject()
-                    .Select(p => p.Name)
-                    .ToArray();
-            });
-        }
-        else
+        // Column cache always fires — DefaultOptions is a stable singleton.
+        var columns = ColumnCache.GetOrAdd(typeof(T), _ =>
         {
             using var doc = JsonDocument.Parse(lines[0]);
-            columns = doc.RootElement.EnumerateObject()
+            return doc.RootElement.EnumerateObject()
                 .Select(p => p.Name)
                 .ToArray();
-        }
+        });
 
         return BuildPayload(tableName, primaryKey, rowsPerStatement, columns, lines);
     }

@@ -147,17 +147,22 @@ public static class SqliteWasmDapperTypeHandlers
 
     private sealed class GuidHandler : SqlMapper.TypeHandler<Guid>
     {
-        public override Guid Parse(object value) => Guid.Parse(value.ToString()!);
+        // TryParse instead of Parse: corrupted rows with sentinel strings (e.g. "DNE") return
+        // Guid.Empty rather than crashing the renderer. The row is preserved and visible to the
+        // UI, which can surface the bad data rather than hard-faulting on load.
+        public override Guid Parse(object value)
+            => Guid.TryParse(value?.ToString(), out var g) ? g : Guid.Empty;
         public override void SetValue(IDbDataParameter parameter, Guid value)
             => parameter.Value = value.ToString();
     }
 
     private sealed class NullableGuidHandler : SqlMapper.TypeHandler<Guid?>
     {
+        // Invalid GUID strings return null (consistent with DBNull treatment) rather than throwing.
         public override Guid? Parse(object value)
         {
             if (value is DBNull || value is null) return null;
-            return Guid.Parse(value.ToString()!);
+            return Guid.TryParse(value.ToString(), out var g) ? g : (Guid?)null;
         }
         public override void SetValue(IDbDataParameter parameter, Guid? value)
             => parameter.Value = value.HasValue ? (object)value.Value.ToString() : DBNull.Value;
