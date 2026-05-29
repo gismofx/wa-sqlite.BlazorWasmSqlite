@@ -38,24 +38,31 @@ public static class SqliteWasmDapperTypeHandlers
     public static void Register()
     {
         if (_registered) return;
-        SqlMapper.AddTypeHandler(new DateTimeHandler());
+        // IMPORTANT: Register nullable handlers BEFORE non-nullable for each pair.
+        // Dapper's AddTypeHandler for Nullable<T> also overwrites TypeHandlerCache<T>.handler
+        // with the nullable handler. Registering the non-nullable handler LAST ensures
+        // TypeHandlerCache<T> has the correct (non-nullable) handler at runtime.
+        // See: https://github.com/DapperLib/Dapper/blob/main/Dapper/SqlMapper.cs
+        //   AddTypeHandlerImpl calls TypeHandlerCache<underlyingType>.SetHandler(handler)
+        //   when the registered type is Nullable<T>, overwriting the non-nullable cache.
         SqlMapper.AddTypeHandler(new NullableDateTimeHandler());
-        SqlMapper.AddTypeHandler(new DateTimeOffsetHandler());
+        SqlMapper.AddTypeHandler(new DateTimeHandler());
         SqlMapper.AddTypeHandler(new NullableDateTimeOffsetHandler());
-        SqlMapper.AddTypeHandler(new BoolHandler());
+        SqlMapper.AddTypeHandler(new DateTimeOffsetHandler());
         SqlMapper.AddTypeHandler(new NullableBoolHandler());
-        SqlMapper.AddTypeHandler(new GuidHandler());
+        SqlMapper.AddTypeHandler(new BoolHandler());
         SqlMapper.AddTypeHandler(new NullableGuidHandler());
-        SqlMapper.AddTypeHandler(new DecimalHandler());
+        SqlMapper.AddTypeHandler(new GuidHandler());
         SqlMapper.AddTypeHandler(new NullableDecimalHandler());
-        SqlMapper.AddTypeHandler(new IntHandler());
+        SqlMapper.AddTypeHandler(new DecimalHandler());
         SqlMapper.AddTypeHandler(new NullableIntHandler());
-        SqlMapper.AddTypeHandler(new LongHandler());
+        SqlMapper.AddTypeHandler(new IntHandler());
         SqlMapper.AddTypeHandler(new NullableLongHandler());
-        SqlMapper.AddTypeHandler(new FloatHandler());
+        SqlMapper.AddTypeHandler(new LongHandler());
         SqlMapper.AddTypeHandler(new NullableFloatHandler());
-        SqlMapper.AddTypeHandler(new DoubleHandler());
+        SqlMapper.AddTypeHandler(new FloatHandler());
         SqlMapper.AddTypeHandler(new NullableDoubleHandler());
+        SqlMapper.AddTypeHandler(new DoubleHandler());
         _registered = true;
     }
 
@@ -147,9 +154,6 @@ public static class SqliteWasmDapperTypeHandlers
 
     private sealed class GuidHandler : SqlMapper.TypeHandler<Guid>
     {
-        // TryParse instead of Parse: corrupted rows with sentinel strings (e.g. "DNE") return
-        // Guid.Empty rather than crashing the renderer. The row is preserved and visible to the
-        // UI, which can surface the bad data rather than hard-faulting on load.
         public override Guid Parse(object value)
             => Guid.TryParse(value?.ToString(), out var g) ? g : Guid.Empty;
         public override void SetValue(IDbDataParameter parameter, Guid value)

@@ -127,7 +127,13 @@ internal sealed class SqliteWasmDbDataReader : DbDataReader
     public override byte GetByte(int ordinal) => GetElement(ordinal).GetByte();
     public override short GetInt16(int ordinal) => GetElement(ordinal).GetInt16();
     public override char GetChar(int ordinal) => GetElement(ordinal).GetString()![0];
-    public override Guid GetGuid(int ordinal) => Guid.Parse(GetElement(ordinal).GetString()!);
+    public override Guid GetGuid(int ordinal)
+    {
+        var el = GetElement(ordinal);
+        if (el.ValueKind == JsonValueKind.Null || el.ValueKind == JsonValueKind.Undefined)
+            return Guid.Empty;
+        return Guid.TryParse(el.GetString(), out var g) ? g : Guid.Empty;
+    }
 
     public override DateTime GetDateTime(int ordinal)
     {

@@ -38,9 +38,12 @@ public static partial class SqliteJsInterop
     [JSImport("open", ModuleName)]
     public static partial Task<int> OpenAsync(string dbName, string fileName);
 
-    /// <summary>Close the database.</summary>
+    /// <summary>
+    /// Close the database. Internal — callers must use <see cref="DBConnection.SqliteWasmConnection.CloseAsync"/>
+    /// to ensure connection state is updated correctly.
+    /// </summary>
     [JSImport("close", ModuleName)]
-    public static partial Task CloseAsync();
+    internal static partial Task CloseAsync();
 
     /// <summary>
     /// Execute a non-query SQL statement.

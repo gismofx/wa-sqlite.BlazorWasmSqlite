@@ -36,8 +36,11 @@ public sealed class SqliteWasmTransaction : DbTransaction
     public async Task CommitAsync()
     {
         if (_completed) return;
-        await SqliteJsInterop.ExecuteAsync(
+        var result = await SqliteJsInterop.ExecuteAsync(
             _connection.ConnectionHandle, "COMMIT", null);
+        var error = result.GetPropertyAsString("error");
+        if (!string.IsNullOrEmpty(error))
+            throw new InvalidOperationException($"SQLite COMMIT failed: {error}");
         _completed = true;
     }
 

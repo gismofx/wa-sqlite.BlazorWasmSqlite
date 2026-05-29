@@ -344,13 +344,32 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             int rowsPerStatement = 100,
             CancellationToken ct = default)
         {
-            var payload = SqliteWorkerPayloadBuilder.BuildUpsertPayload(
-                tableName, records, primaryKey, rowsPerStatement);
-            using var result = await SqliteJsInterop.BulkInsertRawUpsertAsync(
-                connection.ConnectionHandle, payload);
-            return result != null
-                ? (int)result.GetPropertyAsDouble("totalChanges")
-                : 0;
+            try
+            {
+                var payload = SqliteWorkerPayloadBuilder.BuildUpsertPayload(
+                    tableName, records, primaryKey, rowsPerStatement);
+                using var result = await SqliteJsInterop.BulkInsertRawUpsertAsync(
+                    connection.ConnectionHandle, payload);
+
+                if (result != null)
+                {
+                    var firstError = result.GetPropertyAsString("firstError");
+                    if (firstError != null)
+                        throw new InvalidOperationException(
+                            $"SQLite error in table '{tableName}': {firstError}");
+
+                    return (int)result.GetPropertyAsDouble("totalChanges");
+                }
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"UpsertAsync failed for table '{tableName}' (type: {typeof(T).Name}): {ex.Message}", ex);
+            }
+            // TODO: BulkInsertRawAsync (seed path) errors are silently discarded into errors[].
+            // Surface them as warnings at the BulkInsertRawAsync call site.
+            // See session-summary-38.md deferred queue.
         }
 
         [Obsolete("Use SqliteWasmConnection with Dapper ExecuteAsync('DROP TABLE IF EXISTS ...') instead.", error: false)]

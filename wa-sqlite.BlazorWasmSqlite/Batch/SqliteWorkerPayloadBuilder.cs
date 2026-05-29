@@ -5,6 +5,7 @@ using System.Linq;
 using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
+using wa_sqlite.BlazorWasmSqlite.Extensions;
 using wa_sqlite.BlazorWasmSqlite.JsonConverters;
 
 namespace wa_sqlite.BlazorWasmSqlite.Batch;
@@ -98,12 +99,15 @@ public static class SqliteWorkerPayloadBuilder
         string tableName,
         IReadOnlyList<string> rawLines,
         int rowsPerStatement = 100,
-        string primaryKey = "Id")
+        string primaryKey = "Id",
+        IReadOnlySet<string>? excludeColumns = null)
     {
         if (rawLines.Count == 0)
             return $"{tableName}\0{primaryKey}\0{rowsPerStatement}\00\0";
 
-        // Extract column names from the first line — detect "row" vs "rows" bundle format
+        // Extract column names from the first line — detect "row" vs "rows" bundle format.
+        // excludeColumns filters out server-only columns (e.g. SyncSessionId) that exist in
+        // the server schema but have no corresponding column in the client SQLite table.
         string[] columns;
         using (var doc = JsonDocument.Parse(rawLines[0]))
         {
@@ -112,7 +116,9 @@ public static class SqliteWorkerPayloadBuilder
                 ? d
                 : root.GetProperty("rows")[0]; // rows bundle — use first element for schema
             var colList = new List<string>();
-            foreach (var prop in dataEl.EnumerateObject()) colList.Add(prop.Name);
+            foreach (var prop in dataEl.EnumerateObject())
+                if (excludeColumns == null || !excludeColumns.Contains(prop.Name))
+                    colList.Add(prop.Name);
             columns = colList.ToArray();
         }
 
@@ -145,14 +151,13 @@ public static class SqliteWorkerPayloadBuilder
         foreach (var entity in list)
             lines.Add(JsonSerializer.Serialize(entity, DefaultOptions));
 
-        // Column cache always fires — DefaultOptions is a stable singleton.
+        // Column cache always fires — GetAllColumns<T>() is called once per type and cached.
+        // GetAllColumns<T>() respects [SqliteColumnIgnore], [Computed], and [Write(false)] —
+        // ensuring only columns that exist in the SQLite table are included in the INSERT.
         var columns = ColumnCache.GetOrAdd(typeof(T), _ =>
-        {
-            using var doc = JsonDocument.Parse(lines[0]);
-            return doc.RootElement.EnumerateObject()
+            SqliteWasmExtensions.GetAllColumns<T>()
                 .Select(p => p.Name)
-                .ToArray();
-        });
+                .ToArray());
 
         return BuildPayload(tableName, primaryKey, rowsPerStatement, columns, lines);
     }

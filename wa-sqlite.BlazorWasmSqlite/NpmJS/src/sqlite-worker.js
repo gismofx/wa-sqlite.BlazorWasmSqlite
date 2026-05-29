@@ -206,7 +206,7 @@ const handlers = {
                     totalRows++;
                 }
             } else {
-                const dataObj = lineObj.data;
+                const dataObj = lineObj.data ?? lineObj;
                 for (let c = 0; c < colCount; c++) {
                     const val = dataObj[columns[c]];
                     allParams.push(val === true ? 1 : val === false ? 0 : (val !== undefined ? val : null));
@@ -239,7 +239,7 @@ const handlers = {
             rowIndex += stmtRowCount;
         }
 
-        return { totalChanges, errors };
+        return { totalChanges, errors, firstError: errors.length > 0 ? errors[0].error : null };
     },
 };
 
