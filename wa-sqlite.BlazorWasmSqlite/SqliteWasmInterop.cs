@@ -1,18 +1,7 @@
 ﻿using Microsoft.JSInterop;
-using System;
-using System.Collections;
-using System.Collections.Generic;
 using System.Data;
-using System.Data.Common;
-using System.Diagnostics.CodeAnalysis;
-using System.Dynamic;
-using System.Linq;
-using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
-using System.Text.Json.Nodes;
-using System.Threading;
-using System.Threading.Tasks;
 using wa_sqlite.BlazorWasmSqlite.DBConnection;
 using wa_sqlite.BlazorWasmSqlite.JsonConverters;
 
@@ -35,7 +24,7 @@ public class SqliteWasmInterop
 
     public readonly JsonSerializerOptions _JsonSerializerOptions;
 
-    public SqliteWasmInterop(IJSRuntime jsRuntime, SqliteWasmConnectionStringBuilder connStringBuilder )
+    public SqliteWasmInterop(IJSRuntime jsRuntime, SqliteWasmConnectionStringBuilder connStringBuilder)
     {
         DBName = connStringBuilder.DatabaseName;// "MyApp";
         Filename = connStringBuilder.Filename; // "MyFile";
@@ -50,31 +39,27 @@ public class SqliteWasmInterop
         _JsonSerializerOptions.Converters.Add(new DateTimeConvertor());
         _JsonSerializerOptions.Converters.Add(new DateTimeNullableConvertor());
         _JsonSerializerOptions.Converters.Add(new StringConvertor());
-        _JsonSerializerOptions.PropertyNameCaseInsensitive=true; //should be
+        _JsonSerializerOptions.PropertyNameCaseInsensitive = true; //should be
         _JsonSerializerOptions.Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping;
-        //_JsonSerializerOptions.NumberHandling = 
-        
     }
 
     public async ValueTask<string> Prompt(string message)
     {
         //var module = await moduleTask.Value;
         //return await module.InvokeAsync<string>("showPrompt", message);
-        return await _JsRuntime.InvokeAsync<string>("sqlite.showPrompt",message);
+        return await _JsRuntime.InvokeAsync<string>("sqlite.showPrompt", message);
     }
 
     public async ValueTask Init()
     {
-        //var module = await moduleTask.Value;
         await _JsRuntime.InvokeVoidAsync("sqlite.initDatabase");
         //await module.InvokeVoidAsync("InitDatabase");
     }
 
     public async ValueTask<int?> Open()
     {
-        //var module = await moduleTask.Value;
         State = ConnectionState.Connecting;
-        _CurrentDB = await _JsRuntime.InvokeAsync<int>("sqlite.open",DBName, Filename).ConfigureAwait(false);
+        _CurrentDB = await _JsRuntime.InvokeAsync<int>("sqlite.open", DBName, Filename).ConfigureAwait(false);
         if (_CurrentDB.HasValue) State = ConnectionState.Open;
         else State = ConnectionState.Closed;
         return _CurrentDB;
@@ -83,8 +68,7 @@ public class SqliteWasmInterop
     public async ValueTask Close()
     {
         if (_CurrentDB == null) return;
-        //var module = await moduleTask.Value;
-        await _JsRuntime.InvokeVoidAsync("sqlite.close",_CurrentDB);
+        await _JsRuntime.InvokeVoidAsync("sqlite.close", _CurrentDB);
         _CurrentDB = null;
         State = ConnectionState.Closed;
     }
@@ -109,14 +93,12 @@ public class SqliteWasmInterop
         if (State == ConnectionState.Closed)
             await Open();
 
-        //var paramJson = JsonSerializer.Serialize(parameters,_JsonSerializerOptions);
-        //var bytes = Encoding.UTF8.GetBytes(query);
         var result = await _JsRuntime.InvokeAsync<QueryResult>("sqlite.execute", _CurrentDB, query, parameters);// paramJson);// parameters);
-        
+
         if (tState == ConnectionState.Closed)
             await Close();
         //return result;
-        
+
         return result.Changes;
     }
 
@@ -125,9 +107,7 @@ public class SqliteWasmInterop
     public async Task<JsonDocument> Query(string query, IDictionary<string, object>? parameters = null)
     {
         var result = await QueryRaw(query, parameters);//,null);
-        
         return result.Data;
-        //return await Query<JsonNode>(query);
     }
 
     /// <summary>
@@ -137,10 +117,10 @@ public class SqliteWasmInterop
     /// <param name="query"></param>
     /// <param name="parameters"></param>
     /// <returns></returns>
-    public async Task<IEnumerable<T>> Query<T>(string query, IDictionary<string,object>? parameters = null)
+    public async Task<IEnumerable<T>> Query<T>(string query, IDictionary<string, object>? parameters = null)
     {
         var jsonResult = await QueryRaw(query, parameters);
-        if (!string.IsNullOrWhiteSpace(jsonResult.Error)) 
+        if (!string.IsNullOrWhiteSpace(jsonResult.Error))
             return Enumerable.Empty<T>();
         var result = JsonSerializer.Deserialize<IEnumerable<T>>(jsonResult.Data, _JsonSerializerOptions);
         return result;
@@ -153,9 +133,9 @@ public class SqliteWasmInterop
     /// <param name="query"></param>
     /// <param name="parameters"></param>
     /// <returns></returns>
-    public async ValueTask<T> QuerySingle<T>(string query, IDictionary<string, object>? parameters = null ) where T:class
+    public async ValueTask<T> QuerySingle<T>(string query, IDictionary<string, object>? parameters = null) where T : class
     {
-        return (await Query<T>(query,parameters)).FirstOrDefault();
+        return (await Query<T>(query, parameters)).FirstOrDefault();
     }
 
     /// <summary>
@@ -166,7 +146,7 @@ public class SqliteWasmInterop
     /// <returns></returns>
     public async Task<T> QueryScalar<T>(string query, IDictionary<string, object>? parameters = null)
     {
-        var raw = await QueryRaw(query,parameters);
+        var raw = await QueryRaw(query, parameters);
         if (!string.IsNullOrWhiteSpace(raw.Error))
         {
             throw new Exception(raw.Error);
@@ -183,12 +163,9 @@ public class SqliteWasmInterop
                 var x = tt.Deserialize<T>();// Value.Deserialize<T>();
                 return x;
             }
-            return default; 
-            //var json = raw.Data.RootElement.EnumerateObject() //Deserialize<IEnumerable<KeyValuePair<string,T>>>();
-            //return json.First().Value;
-            //return json.First().Value;
+            return default;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             return default;
         }
@@ -213,34 +190,20 @@ public class SqliteWasmInterop
                 {
                     values.Add(ob.Value.Deserialize<T>());
                 }
-                //var x = tt.Deserialize<T>();// Value.Deserialize<T>();
-                //return x;
             }
             return values;//default;
-            //var json = raw.Data.RootElement.EnumerateObject() //Deserialize<IEnumerable<KeyValuePair<string,T>>>();
-            //return json.First().Value;
-            //return json.First().Value;
+
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             return default;
         }
-
-        //return default(T);
     }
 
 
-    //public async Task<T> QueryRaw<T>(string query, IDictionary<string, object>? parameters = null)
-    //{
-
-    //}
-
-    private static object _lock = new object();
-    //private static SemaphoreSlim _semaphoreSlim = new SemaphoreSlim();
     private readonly SemaphoreSlim _semaphore = new SemaphoreSlim(1, 1);
     public async Task<QueryResult> QueryRaw(string query, IDictionary<string, object>? parameters = null)
     {
-        //lock (_lock)//Todo: Chad Test lock
         await _semaphore.WaitAsync();
         try
         {
@@ -260,7 +223,6 @@ public class SqliteWasmInterop
             }
             try
             {
-                //var jsonResult = await _JsRuntime.InvokeAsync<QueryResult<T>>("sqlite.query", _CurrentDB, query, parameters);
                 var queryResult = await _JsRuntime.InvokeAsync<QueryResult>("sqlite.query", _CurrentDB, query, parameters);
                 return queryResult;
             }
