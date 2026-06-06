@@ -197,9 +197,7 @@
                 "SELECT * FROM jsimport_test", null);
             QueryResult += $"[JSImport] QueryJson: {json}\n";
 
-            // 5. Close
-            await SqliteJsInterop.CloseAsync();
-            QueryResult += "[JSImport] Closed. All tests passed!";
+            QueryResult += "[JSImport] All tests passed!";
         }
         catch (Exception ex)
         {

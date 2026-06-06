@@ -47,6 +47,7 @@ module.exports = (env, argv) => {
             output: {
                 path: outputPath,
                 filename: 'sqlite-worker.js',
+                chunkFilename: '[name].[contenthash].js',
                 sourceMapFilename: '[file].map',
             },
         },

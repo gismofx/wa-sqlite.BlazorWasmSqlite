@@ -1,10 +1,13 @@
 // @journeyapps/wa-sqlite is the actively-maintained PowerSync fork of rhashimoto/wa-sqlite.
 // The original npm package (wa-sqlite@1.0.0) is 2 years stale and contains a WASM memory
 // OOB bug that causes "disk image is malformed" corruption on large seeds.
-// JSPI build (wa-sqlite-jspi.mjs) is used instead of Asyncify (wa-sqlite-async.mjs) because
-// Asyncify triggers a Windows debugger access violation during WASM JIT compilation.
-// JSPI is stable in Chrome 137+ (unflagged) and has no stack-rewriting overhead.
-import SQLiteAsyncESMFactory from '@journeyapps/wa-sqlite/dist/wa-sqlite-jspi.mjs';
+//
+// Build selection (detected at runtime in ensureEngine):
+//   JSPI build (wa-sqlite-jspi.mjs)   — Chrome 137+, Edge 137+. No stack-rewriting overhead.
+//   Asyncify build (wa-sqlite-async.mjs) — fallback for Safari and older browsers.
+//   Safari does not yet support JSPI (tracked in Interop 2026).
+//
+// No static import here — factory is loaded dynamically based on WebAssembly.Suspending support.
 import * as SQLite from '@journeyapps/wa-sqlite';
 import { IDBBatchAtomicVFS } from '@journeyapps/wa-sqlite/src/examples/IDBBatchAtomicVFS';
 
@@ -20,6 +23,13 @@ const registeredVfs = new Map();
 
 async function ensureEngine() {
     if (sqlite3) return;
+    const supportsJspi = typeof WebAssembly.Suspending !== 'undefined';
+    if (!supportsJspi) {
+        console.warn('[wa-sqlite] JSPI not supported in this browser — falling back to Asyncify build. Safari and older browsers only.');
+    }
+    const { default: SQLiteAsyncESMFactory } = supportsJspi
+        ? await import(/* webpackChunkName: "wa-sqlite-jspi" */ '@journeyapps/wa-sqlite/dist/wa-sqlite-jspi.mjs')
+        : await import(/* webpackChunkName: "wa-sqlite-async" */ '@journeyapps/wa-sqlite/dist/wa-sqlite-async.mjs');
     asyncModule = await SQLiteAsyncESMFactory();
     sqlite3 = SQLite.Factory(asyncModule);
 }
