@@ -8,6 +8,10 @@ using System.Threading.Tasks;
 
 namespace wa_sqlite.BlazorWasmSqlite
 {
+    /// <summary>
+    /// Represents a row returned by <c>PRAGMA table_list</c>.
+    /// Used by <see cref="Extensions.SqliteWasmExtensions.QueryAllTablesAsync"/>.
+    /// </summary>
     public class SqliteTableInfo
     {
         public string Schema { get; set; }

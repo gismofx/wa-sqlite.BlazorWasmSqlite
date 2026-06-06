@@ -27,12 +27,20 @@ public sealed class SqliteWasmConnection : DbConnection
     /// </summary>
     internal readonly SemaphoreSlim WorkerLock = new SemaphoreSlim(1, 1);
 
+    /// <summary>
+    /// Initialises a connection to the SQLite database stored in IndexedDB.
+    /// </summary>
+    /// <param name="dbName">Logical database name passed to <c>sqlite3_open_v2</c>.</param>
+    /// <param name="fileName">IndexedDB VFS file name — used as the IDB database key.</param>
     public SqliteWasmConnection(string dbName, string fileName)
     {
         _dbName = dbName;
         _fileName = fileName;
     }
 
+    /// <summary>
+    /// Initialises a connection using a <see cref="SqliteWasmConnectionStringBuilder"/>.
+    /// </summary>
     public SqliteWasmConnection(SqliteWasmConnectionStringBuilder builder)
         : this(builder.DatabaseName, builder.Filename) { }
 
@@ -46,6 +54,10 @@ public sealed class SqliteWasmConnection : DbConnection
 
     // ── Async (primary path) ──────────────────────────────────────────
 
+    /// <summary>
+    /// Opens the database connection via the Web Worker and sets foundational PRAGMAs.
+    /// Safe to call multiple times — no-ops if already open.
+    /// </summary>
     public override async Task OpenAsync(CancellationToken cancellationToken)
     {
         if (_state == ConnectionState.Open) return;
@@ -64,6 +76,7 @@ public sealed class SqliteWasmConnection : DbConnection
         await SqliteJsInterop.ExecuteAsync(ConnectionHandle, "PRAGMA temp_store=MEMORY", null);
     }
 
+    /// <summary>Closes the database and releases the IndexedDB VFS lock.</summary>
     public override async Task CloseAsync()
     {
         if (_state == ConnectionState.Closed) return;
@@ -72,6 +85,7 @@ public sealed class SqliteWasmConnection : DbConnection
         ConnectionHandle = 0;
     }
 
+    /// <summary>Closes the connection if open before disposing.</summary>
     public override async ValueTask DisposeAsync()
     {
         if (_state != ConnectionState.Closed)
@@ -83,6 +97,10 @@ public sealed class SqliteWasmConnection : DbConnection
     protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel) =>
         throw new NotSupportedException("Use BeginTransactionAsync.");
 
+    /// <summary>
+    /// Begins a SQLite transaction. Commit or roll back via the returned
+    /// <see cref="SqliteWasmTransaction"/>.
+    /// </summary>
     public async Task<SqliteWasmTransaction> BeginTransactionAsync()
     {
         var txn = new SqliteWasmTransaction(this);
@@ -95,6 +113,7 @@ public sealed class SqliteWasmConnection : DbConnection
     protected override DbCommand CreateDbCommand() =>
         new SqliteWasmCommand { Connection = this };
 
+    /// <summary>Creates a new <see cref="SqliteWasmCommand"/> bound to this connection.</summary>
     public new SqliteWasmCommand CreateCommand() =>
         new SqliteWasmCommand { Connection = this };
 

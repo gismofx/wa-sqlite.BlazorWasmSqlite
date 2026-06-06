@@ -6,6 +6,10 @@ using System.Threading.Tasks;
 
 namespace wa_sqlite.BlazorWasmSqlite
 {
+    /// <summary>
+    /// Represents a row returned by <c>PRAGMA table_info</c>.
+    /// Used by <see cref="Extensions.SqliteWasmExtensions.QueryTableSchemaAsync"/>.
+    /// </summary>
     public class SqliteColumnInfo
     {
         public int cid { get; set; }

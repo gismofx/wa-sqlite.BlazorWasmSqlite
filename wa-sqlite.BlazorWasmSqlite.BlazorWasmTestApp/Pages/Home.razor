@@ -1,6 +1,5 @@
 ﻿@page "/"
 
-@inject SqliteWasmInterop sqlite;
 @using wa_sqlite.BlazorWasmSqlite.Attributes
 @using wa_sqlite.BlazorWasmSqlite.Extensions
 @using System.Runtime.InteropServices.JavaScript
@@ -58,115 +57,98 @@
 
 
 @code{
+    private SqliteWasmConnection? _conn;
     private string Status = "Closed";
-
     private string Query = string.Empty;
-
     private string QueryResult = string.Empty;
-
     private IEnumerable<SqliteTableInfo> Tables = Enumerable.Empty<SqliteTableInfo>();
 
-    private async Task RefreshTablesClick()
+    private async Task<SqliteWasmConnection> EnsureConnectionAsync()
     {
-        Tables = await sqlite.QueryAllTables();
-    }
-
-    private async Task LoadColumns(string tableName)
-    {
-        var columns = await sqlite.QueryTableSchema(tableName);
-        Tables.Where(x => x.Name == tableName).First().Columns = columns;
+        if (_conn == null || _conn.State != System.Data.ConnectionState.Open)
+        {
+            _conn = new SqliteWasmConnection("MyApp", "MyFile");
+            await _conn.OpenAsync();
+            Status = "Open";
+        }
+        return _conn;
     }
 
     private async Task OpenClick()
     {
-        var result = await sqlite.Open();
-        Status = result.HasValue ? "Open" : "Closed";
+        var conn = await EnsureConnectionAsync();
+        Status = conn.State == System.Data.ConnectionState.Open ? "Open" : "Closed";
+    }
+
+    private async Task RefreshTablesClick()
+    {
+        var conn = await EnsureConnectionAsync();
+        Tables = await conn.QueryAllTablesAsync();
+    }
+
+    private async Task LoadColumns(string tableName)
+    {
+        var conn = await EnsureConnectionAsync();
+        var columns = await conn.QueryTableSchemaAsync(tableName);
+        Tables.Where(x => x.Name == tableName).First().Columns = columns;
     }
 
     private async ValueTask ExecuteQueryClick()
     {
         if (string.IsNullOrWhiteSpace(Query)) return;
-
-        var result = await sqlite.Query<System.Text.Json.Nodes.JsonNode>(Query);
-        QueryResult = ToJsonString(result);
-
+        var conn = await EnsureConnectionAsync();
+        var results = await conn.QueryAsync<dynamic>(Query);
+        QueryResult = ToJsonString(results);
     }
 
     private async ValueTask ExecuteQueryParam()
     {
-        var sql = @"Select * from contacts where id=@id";
-
-        var sparams = new Dictionary<string, object>();
-        sparams.Add("@id", 1);
-        var result = await sqlite.Query<System.Text.Json.Nodes.JsonNode>(sql,sparams);
-        QueryResult = ToJsonString(result);
+        var conn = await EnsureConnectionAsync();
+        var results = await conn.QueryAsync<dynamic>(
+            "SELECT * FROM contacts WHERE id = @id", new { id = 1 });
+        QueryResult = ToJsonString(results);
     }
 
-    private string ToJsonString(IEnumerable<System.Text.Json.Nodes.JsonNode> results)
+    private string ToJsonString(IEnumerable<dynamic> results)
     {
-        if (results.Count() == 0) return "The query returned no results.";
-        var opts = new System.Text.Json.JsonSerializerOptions() { WriteIndented = true };
-        return string.Join(Environment.NewLine, results.Select(x => x.ToJsonString(opts)));
+        var list = results.ToList();
+        if (list.Count == 0) return "The query returned no results.";
+        var opts = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
+        return System.Text.Json.JsonSerializer.Serialize(
+            list.Select(r => (IDictionary<string, object>)r), opts);
     }
 
     private async Task InsertTableAndData()
     {
-        var tableCreate = @"CREATE TABLE IF NOT EXISTS contacts (
-	                id INTEGER PRIMARY KEY,
-	                FirstName TEXT NOT NULL,
-	                LastName TEXT NOT NULL,
-	                Email TEXT UNIQUE,
-	                epochTimeSeconds NUMERIC)";
+        var conn = await EnsureConnectionAsync();
+        await conn.ExecuteAsync(@"CREATE TABLE IF NOT EXISTS contacts (
+            id INTEGER PRIMARY KEY,
+            FirstName TEXT NOT NULL,
+            LastName TEXT NOT NULL,
+            Email TEXT UNIQUE,
+            epochTimeSeconds NUMERIC)");
 
-        var result = await sqlite.Execute(tableCreate);
-
-        var sqlInsert =
-            @"INSERT INTO contacts (id, firstName, LastName, Email, EpochTimeSeconds)
-        VALUES 
-        (1,'Bob','Dob','bob@email.com',1),
-        (2,'Tina','Tuna','tina@email.com',2),
-        (3,'Rob','Lob','rob@email.com',3),
-        (4,'John','Shmon','john@email.com',4),
-        (5,'Sam','Ham','sam@email.com',5),
-        (6,'Rachel','Achel','rachel@email.com',6)";
-
-        var queryResult = result.ToString() + Environment.NewLine + await sqlite.Execute(sqlInsert);
-
-
+        var rows = await conn.ExecuteAsync(@"INSERT OR IGNORE INTO contacts
+            (id, FirstName, LastName, Email, EpochTimeSeconds) VALUES
+            (1,'Bob','Dob','bob@email.com',1),
+            (2,'Tina','Tuna','tina@email.com',2),
+            (3,'Rob','Lob','rob@email.com',3),
+            (4,'John','Shmon','john@email.com',4),
+            (5,'Sam','Ham','sam@email.com',5),
+            (6,'Rachel','Achel','rachel@email.com',6)");
+        QueryResult = $"Inserted {rows} row(s).";
     }
-
-    
 
     private async Task UpsertClick()
     {
-        var models = new List<model>();
-        var m = new model()
-            {
-
-                Id = 10,
-                Email = "grog@bemail.com",
-                FirstName = "Grog",
-                LastName = "Dog",
-                EpochTimeSeconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-
-            };
-
-        var m2 = new model()
-            {
-
-                Id = 11,
-                Email = "grog2@bemail2.com",
-                FirstName = "Grog2",
-                LastName = "Dog2",
-                EpochTimeSeconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-
-            };
-
-        models.Add(m);
-        models.Add(m2);
-        var tableName = "Contacts";
-
-        var what = await sqlite.Upsert<model>(models, tableName);
+        var conn = await EnsureConnectionAsync();
+        var models = new List<model>
+        {
+            new model { Id = 10, Email = "grog@bemail.com",  FirstName = "Grog",  LastName = "Dog",  EpochTimeSeconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() },
+            new model { Id = 11, Email = "grog2@bemail2.com", FirstName = "Grog2", LastName = "Dog2", EpochTimeSeconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }
+        };
+        var changes = await conn.UpsertAsync<model>("Contacts", models);
+        QueryResult = $"Upserted {changes} row(s).";
     }
 
     private async Task JsImportTestClick()
@@ -209,15 +191,12 @@
     {
         try
         {
-            await using var conn = new SqliteWasmConnection("MyApp", "MyFile");
-            await conn.OpenAsync();
+            var conn = await EnsureConnectionAsync();
             QueryResult = "[Dapper] Connected\n";
 
-            // Create table
             await conn.ExecuteAsync("CREATE TABLE IF NOT EXISTS dapper_test (Id INTEGER PRIMARY KEY, Name TEXT, Score REAL)");
             QueryResult += "[Dapper] Table created\n";
 
-            // Insert via DbCommand with parameters
             var cmd = conn.CreateCommand();
             cmd.CommandText = "INSERT OR REPLACE INTO dapper_test (Id, Name, Score) VALUES (@Id, @Name, @Score)";
             cmd.Parameters.Add("@Id", 1);
@@ -226,16 +205,13 @@
             var rows = await cmd.ExecuteNonQueryAsync();
             QueryResult += $"[Dapper] Insert: {rows} row(s)\n";
 
-            // Query via Dapper
             var results = await conn.QueryAsync<dynamic>("SELECT * FROM dapper_test");
             foreach (var r in results)
                 QueryResult += $"[Dapper] Row: Id={r.Id}, Name={r.Name}, Score={r.Score}\n";
 
-            // Scalar
             var count = await conn.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM dapper_test");
             QueryResult += $"[Dapper] Count: {count}\n";
 
-            // Transaction test
             var txn = await conn.BeginTransactionAsync();
             await conn.ExecuteAsync("INSERT OR REPLACE INTO dapper_test (Id, Name, Score) VALUES (2, 'Bob', 88.0)");
             await txn.CommitAsync();
@@ -245,7 +221,6 @@
             foreach (var r in allRows)
                 QueryResult += $"[Dapper] Row: Id={r.Id}, Name={r.Name}, Score={r.Score}\n";
 
-            await conn.CloseAsync();
             QueryResult += "[Dapper] All tests passed!";
         }
         catch (Exception ex)
@@ -253,6 +228,4 @@
             QueryResult = $"[Dapper] ERROR: {ex.Message}\n{ex.StackTrace}";
         }
     }
-
-
 }
