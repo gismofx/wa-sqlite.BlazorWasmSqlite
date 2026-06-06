@@ -3,6 +3,12 @@ name: Publish NuGet Package
 on:
   release:
     types: [published]   # Trigger from GitHub web UI: Releases → Draft new release → Publish
+  workflow_dispatch:     # Also triggerable manually from Actions tab
+    inputs:
+      version:
+        description: 'Package version (e.g. 1.0.0)'
+        required: true
+        default: '1.0.0'
 
 jobs:
   publish:
@@ -26,9 +32,14 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Extract version from tag
+      - name: Extract version from tag or input
         id: version
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          fi
 
       - name: Pack
         run: >
