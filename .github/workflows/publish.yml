@@ -10,6 +10,8 @@ jobs:
     permissions:
       contents: read
       id-token: write   # Required for NuGet trusted publishing OIDC
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - uses: actions/checkout@v4
@@ -37,8 +39,9 @@ jobs:
 
       - name: NuGet login (OIDC → temporary API key)
         uses: NuGet/login@v1
+        id: login
         with:
           user: gismofx
 
       - name: Push to NuGet
-        run: dotnet nuget push ./nupkg/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate
+        run: dotnet nuget push ./nupkg/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --skip-duplicate
