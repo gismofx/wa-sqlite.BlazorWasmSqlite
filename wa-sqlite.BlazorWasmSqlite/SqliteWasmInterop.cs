@@ -97,7 +97,6 @@ public class SqliteWasmInterop
 
         if (tState == ConnectionState.Closed)
             await Close();
-        //return result;
 
         return result.Changes;
     }
