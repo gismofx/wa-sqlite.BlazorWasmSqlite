@@ -4,8 +4,8 @@ using System.Text.Json.Serialization;
 namespace wa_sqlite.BlazorWasmSqlite.JsonConverters;
 
 /// <summary>
-/// Sqlite does not like "boolean". C# boolean values must be converted to 0 or 1
-/// 1=true 0=false
+/// Converts nullable DateTime values stored in SQLite as either Unix epoch seconds (legacy)
+/// or ISO 8601 strings (BulkInsertRaw / seeded data) to <see cref="DateTime?"/>.
 /// </summary>
 internal class DateTimeNullableConvertor : JsonConverter<DateTime?>
 {
@@ -14,18 +14,17 @@ internal class DateTimeNullableConvertor : JsonConverter<DateTime?>
         if (reader.TokenType == JsonTokenType.Null)
             return null;
 
-        long seconds;
-
         if (reader.TokenType == JsonTokenType.String)
         {
-            seconds = long.Parse(reader.GetString());
-        }
-        else
-        {
-            seconds = reader.GetInt64();
+            var s = reader.GetString()!;
+            // Legacy path: stored as unix epoch seconds string (old SqliteWasmInterop write path)
+            // New path: stored as ISO 8601 string (BulkInsertRaw / seeded data)
+            if (long.TryParse(s, out var epochSeconds))
+                return DateTime.UnixEpoch.AddSeconds(epochSeconds);
+            return DateTime.Parse(s);
         }
 
-        return DateTime.UnixEpoch.AddSeconds(seconds);
+        return DateTime.UnixEpoch.AddSeconds(reader.GetInt64());
     }
 
     public override void Write(Utf8JsonWriter writer, DateTime? value, JsonSerializerOptions options)

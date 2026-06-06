@@ -4,6 +4,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>wa_sqlite.BlazorWasmSqlite</RootNamespace>
   </PropertyGroup>
 
@@ -13,21 +14,25 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.1.72" />
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="8.0.11" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- Exposes internal members (Coerce, etc.) for direct unit testing -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>wa-sqlite.BlazorWasmSqlite.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
 	
-	<PropertyGroup Condition="'$(Configuration)' == 'Debug|AnyCPU'">
-		<NpmConfiguration>dev</NpmConfiguration>
+	<PropertyGroup>
+		<NpmScript Condition="'$(Configuration)' == 'Release'">prod</NpmScript>
+		<NpmScript Condition="'$(Configuration)' != 'Release'">dev</NpmScript>
 	</PropertyGroup>
 
-	<PropertyGroup Condition="'$(Configuration)' == 'Release|AnyCPU'">
-		<NpmConfiguration>prod</NpmConfiguration>
-	</PropertyGroup>
-	<!--$(NpmConfiguration)-->
-
-	<Target Name="InstallAndRunNpm" BeforeTargets="PreBuildEvent">
+	<Target Name="InstallAndRunNpm" BeforeTargets="PreBuildEvent" Condition="'$(SkipNpmBuild)' != 'true'">
 		<Exec Command="npm install" WorkingDirectory="NpmJS" />
-		<Exec Command="npm run-script prod" WorkingDirectory="NpmJS" />
+		<Exec Command="npm run-script $(NpmScript)" WorkingDirectory="NpmJS" />
 	</Target>
 	
 

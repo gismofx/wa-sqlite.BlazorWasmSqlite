@@ -15,7 +15,12 @@ internal class DateTimeConvertor : JsonConverter<DateTime>
 
         if (reader.TokenType == JsonTokenType.String)
         {
-            seconds = long.Parse(reader.GetString());
+            var s = reader.GetString()!;
+            // Legacy path: stored as unix epoch seconds string (old SqliteWasmInterop write path)
+            // New path: stored as ISO 8601 string (BulkInsertRaw / seeded data)
+            if (long.TryParse(s, out var epochSeconds))
+                return DateTime.UnixEpoch.AddSeconds(epochSeconds);
+            return DateTime.Parse(s);
         }
         else
         {

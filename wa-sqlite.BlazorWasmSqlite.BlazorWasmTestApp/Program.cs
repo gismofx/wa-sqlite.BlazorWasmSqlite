@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using MudBlazor.Services;
+using wa_sqlite.BlazorWasmSqlite;
 using wa_sqlite.BlazorWasmSqlite.DBConnection;
 
 namespace wa_sqlite.BlazorWasmSqlite.BlazorWasmTestApp
@@ -24,8 +25,12 @@ namespace wa_sqlite.BlazorWasmSqlite.BlazorWasmTestApp
 
             builder.Services.AddMudServices();
 
+            var host = builder.Build();
 
-            await builder.Build().RunAsync();
+            // Initialize [JSImport] module (loads sqlite-interop.js ES module)
+            await SqliteJsInterop.InitializeAsync();
+
+            await host.RunAsync();
         }
     }
 }

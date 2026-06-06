@@ -1,103 +1,138 @@
-﻿using System;
-using System.Collections.Generic;
+using System;
 using System.Data;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-//using System.Data.SQLite;
 using System.Data.Common;
+using System.Threading;
+using System.Threading.Tasks;
 
-namespace wa_sqlite.BlazorWasmSqlite.DBConnection
+namespace wa_sqlite.BlazorWasmSqlite.DBConnection;
+
+/// <summary>
+/// ADO.NET DbConnection backed by <see cref="SqliteJsInterop"/> and Web Worker.
+/// Async-only — sync <see cref="Open"/> throws <see cref="NotSupportedException"/>.
+/// </summary>
+public sealed class SqliteWasmConnection : DbConnection
 {
-    public class SqliteWasmConnection : DbConnection, IDbConnection
+    private readonly string _dbName;
+    private readonly string _fileName;
+    private ConnectionState _state = ConnectionState.Closed;
+
+    /// <summary>Connection handle returned by wa-sqlite open_v2.</summary>
+    public int ConnectionHandle { get; private set; }
+
+    /// <summary>
+    /// Serializes all Worker round-trips through a single async gate.
+    /// The Worker is sequential but the C# side can fire multiple concurrent
+    /// awaits (e.g. page-load queries), causing responses to be delivered to
+    /// the wrong awaiter and producing corrupt-looking JSON / SQLITE_CORRUPT errors.
+    /// </summary>
+    internal readonly SemaphoreSlim WorkerLock = new SemaphoreSlim(1, 1);
+
+    /// <summary>
+    /// Initialises a connection to the SQLite database stored in IndexedDB.
+    /// </summary>
+    /// <param name="dbName">Logical database name passed to <c>sqlite3_open_v2</c>.</param>
+    /// <param name="fileName">IndexedDB VFS file name — used as the IDB database key.</param>
+    public SqliteWasmConnection(string dbName, string fileName)
     {
-        private SqliteWasmInterop _SqliteWasmInterop;
-
-        private string _ConnectionString;
-
-        public SqliteWasmConnection(SqliteWasmInterop sqliteWasmInterop)//, string connString)
-        {
-            _SqliteWasmInterop = sqliteWasmInterop;
-        }
-        //public string ConnectionString { get; set; }
-        public override string ConnectionString { get => _ConnectionString; set => throw new NotImplementedException(); }
-
-        public int ConnectionTimeout => throw new NotImplementedException();
-
-
-        public override string Database => throw new NotImplementedException();
-
-        public override ConnectionState State => _SqliteWasmInterop.State;
-
-
-        public override string DataSource => throw new NotImplementedException();
-
-        public override string ServerVersion => throw new NotImplementedException();
-
-        public IDbTransaction BeginTransaction()
-        {
-            throw new NotImplementedException();
-        }
-
-        public IDbTransaction BeginTransaction(IsolationLevel il)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override void ChangeDatabase(string databaseName)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override void Close()
-        {
-            //_SqliteWasmInterop.Close().GetAwaiter().GetResult();
-        }
-
-        public void Dispose()
-        {
-            _SqliteWasmInterop.DisposeAsync().GetAwaiter().GetResult();
-        }
-
-        public override void Open()
-        {
-            throw new NotImplementedException();
-            //_SqliteWasmInterop.Open("MyApp", "MyFile").In //GetAwaiter().GetResult();
-        }
-
-        public override async Task OpenAsync(CancellationToken cancellationToken)
-        {
-            await _SqliteWasmInterop.Open().AsTask();
-        }
-
-        public override async Task CloseAsync()
-        {
-            await _SqliteWasmInterop.Close();
-        }
-
-        public override async ValueTask DisposeAsync()
-        {
-            await _SqliteWasmInterop.DisposeAsync();
-        }
-
-        protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel)
-        {
-            throw new NotImplementedException();
-        }
-
-        protected override DbCommand CreateDbCommand()
-        {
-
-            return new SqliteWasmCommand(_SqliteWasmInterop) { Connection = this };
-
-
-        }
-
-        #region Helpers
-
-
-
-        #endregion
-
+        _dbName = dbName;
+        _fileName = fileName;
     }
+
+    /// <summary>
+    /// Initialises a connection using a <see cref="SqliteWasmConnectionStringBuilder"/>.
+    /// </summary>
+    public SqliteWasmConnection(SqliteWasmConnectionStringBuilder builder)
+        : this(builder.DatabaseName, builder.Filename) { }
+
+    // ── Properties ─────────────────────────────────────────────────────
+
+    public override string ConnectionString { get; set; } = string.Empty;
+    public override string Database => _dbName;
+    public override string DataSource => _fileName;
+    public override string ServerVersion => "wa-sqlite";
+    public override ConnectionState State => _state;
+
+    // ── Async (primary path) ──────────────────────────────────────────
+
+    /// <summary>
+    /// Opens the database connection via the Web Worker and sets foundational PRAGMAs.
+    /// Safe to call multiple times — no-ops if already open.
+    /// </summary>
+    public override async Task OpenAsync(CancellationToken cancellationToken)
+    {
+        if (_state == ConnectionState.Open) return;
+        _state = ConnectionState.Connecting;
+        ConnectionHandle = await SqliteJsInterop.OpenAsync(_dbName, _fileName);
+        _state = ConnectionState.Open;
+
+        // Set foundational connection pragmas. These are safe to set unconditionally:
+        // - page_size: silently ignored if database already has data (only effective on first
+        //   write of a new database). 8192 halves IDB round-trips vs the SQLite default of
+        //   4096 for wide-row workloads (multiple TEXT columns per row).
+        // - temp_store: keeps SQLite's internal temp B-trees and sort spills in memory rather
+        //   than routing them through the async IDBBatchAtomicVFS. Standard best practice for
+        //   all WASM SQLite deployments — temp data is ephemeral and has no durability requirement.
+        await SqliteJsInterop.ExecuteAsync(ConnectionHandle, "PRAGMA page_size=8192", null);
+        await SqliteJsInterop.ExecuteAsync(ConnectionHandle, "PRAGMA temp_store=MEMORY", null);
+    }
+
+    /// <summary>Closes the database and releases the IndexedDB VFS lock.</summary>
+    public override async Task CloseAsync()
+    {
+        if (_state == ConnectionState.Closed) return;
+        await SqliteJsInterop.CloseAsync();
+        _state = ConnectionState.Closed;
+        ConnectionHandle = 0;
+    }
+
+    /// <summary>Closes the connection if open before disposing.</summary>
+    public override async ValueTask DisposeAsync()
+    {
+        if (_state != ConnectionState.Closed)
+            await CloseAsync();
+    }
+
+    // ── Transaction ───────────────────────────────────────────────────
+
+    protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel) =>
+        throw new NotSupportedException("Use BeginTransactionAsync.");
+
+    /// <summary>
+    /// Begins a SQLite transaction. Commit or roll back via the returned
+    /// <see cref="SqliteWasmTransaction"/>.
+    /// </summary>
+    public async Task<SqliteWasmTransaction> BeginTransactionAsync()
+    {
+        var txn = new SqliteWasmTransaction(this);
+        await txn.BeginAsync();
+        return txn;
+    }
+
+    // ── Command factory ───────────────────────────────────────────────
+
+    protected override DbCommand CreateDbCommand() =>
+        new SqliteWasmCommand { Connection = this };
+
+    /// <summary>Creates a new <see cref="SqliteWasmCommand"/> bound to this connection.</summary>
+    public new SqliteWasmCommand CreateCommand() =>
+        new SqliteWasmCommand { Connection = this };
+
+    // ── Sync — not supported in WASM ──────────────────────────────────
+
+    public override void Open() =>
+        throw new NotSupportedException("Use OpenAsync. Sync operations are not supported in WASM.");
+
+    public override void Close()
+    {
+        // Dapper calls sync Close() after queries when it opened the connection.
+        // SqliteWasmConnection is a singleton that must stay open — ignore the close
+        // but warn so callers know this happened (e.g. pass connection pre-opened
+        // to Dapper to suppress this path entirely).
+        Console.WriteLine("[wa-sqlite] WARNING: SqliteWasmConnection.Close() called synchronously. " +
+                          "This is a no-op in WASM. Ensure the connection is already Open before " +
+                          "passing it to Dapper to avoid this call.");
+    }
+
+    public override void ChangeDatabase(string databaseName) =>
+        throw new NotSupportedException();
 }

@@ -1,0 +1,278 @@
+@page "/null-binding"
+@using Dapper
+@using wa_sqlite.BlazorWasmSqlite.DBConnection
+@inject IJSRuntime JS
+
+<PageTitle>Null Parameter Binding</PageTitle>
+
+<MudContainer>
+    <MudText Typo="Typo.h5" Class="mb-2">DBNull / NULL Parameter Binding</MudText>
+    <MudText Typo="Typo.body2" Class="mb-1" Color="Color.Secondary">
+        Verifies that C# null values passed through Dapper reach SQLite as NULL — not as an
+        unknown object that triggers <code>console.warn('unknown binding converted to null', {})</code>.
+    </MudText>
+    <MudText Typo="Typo.body2" Class="mb-4" Color="Color.Warning">
+        Open the browser DevTools console before running. Without the fix you will see one
+        <em>"unknown binding converted to null {}"</em> warning per null parameter.
+        With the fix, zero warnings appear.
+    </MudText>
+
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="RunTests" Class="mb-4">
+        Run Tests
+    </MudButton>
+
+    @if (_results.Any())
+    {
+        <MudSimpleTable Dense="true" Striped="true">
+            <thead>
+                <tr><th>Test</th><th>Result</th><th>Detail</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var r in _results)
+                {
+                    <tr>
+                        <td>@r.Name</td>
+                        <td>
+                            <MudChip T="string"
+                                     Color="@(r.Pass ? Color.Success : Color.Error)"
+                                     Size="Size.Small">
+                                @(r.Pass ? "PASS" : "FAIL")
+                            </MudChip>
+                        </td>
+                        <td style="font-family:monospace;font-size:0.8em">@r.Detail</td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+        <MudText Class="mt-3">@_results.Count(r => r.Pass) / @_results.Count passed</MudText>
+    }
+</MudContainer>
+@code {
+    // ── State ─────────────────────────────────────────────────────────────────
+
+    private record TestResult(string Name, bool Pass, string Detail);
+    private List<TestResult> _results = new();
+
+    private void Pass(string name, string detail = "") => _results.Add(new(name, true, detail));
+    private void Fail(string name, string detail)      => _results.Add(new(name, false, detail));
+
+    // ── Entry point ───────────────────────────────────────────────────────────
+
+    private async Task RunTests()
+    {
+        _results.Clear();
+        StateHasChanged();
+
+        var conn = new SqliteWasmConnection("NullBindingTest", "NullBindingFile");
+        try
+        {
+            await conn.OpenAsync(default);
+            await SetupTable(conn);
+
+            // ── Install console.warn interceptor ──────────────────────────────
+            // Counts how many times the JS worker emits 'unknown binding converted to null'.
+            // That warning fires when a non-null, non-primitive JS value reaches bind() —
+            // which is what happens when C# DBNull serialises to JSON {}.
+            await JS.InvokeVoidAsync("eval", @"
+                window.__nullBindingWarnings = 0;
+                window.__origWarn = console.warn;
+                console.warn = function() {
+                    var args = Array.prototype.slice.call(arguments);
+                    if (typeof args[0] === 'string' &&
+                        args[0].indexOf('unknown binding converted to null') !== -1) {
+                        window.__nullBindingWarnings++;
+                    }
+                    window.__origWarn.apply(console, args);
+                };
+                ");
+
+            // ── Run insert tests ──────────────────────────────────────────────
+            await Test_AnonymousObjectNullString(conn);
+            await Test_DynamicParametersNullString(conn);
+            await Test_DynamicParametersNullGuid(conn);
+            await Test_DynamicParametersNullDecimal(conn);
+            await Test_DynamicParametersNullDateTime(conn);
+            await Test_MultipleNullsInOneInsert(conn);
+
+            // ── Restore console.warn and check warning count ──────────────────
+            await JS.InvokeVoidAsync("eval", "console.warn = window.__origWarn;");
+            var warningCount = await JS.InvokeAsync<int>("eval", "window.__nullBindingWarnings");
+
+            if (warningCount == 0)
+                Pass("No 'unknown binding' warnings fired", $"0 warnings across all null inserts ✓");
+            else
+                Fail("No 'unknown binding' warnings fired",
+                     $"{warningCount} warning(s) fired — DBNull reaching JS as {{}}. Apply the Coerce fix.");
+
+            // ── Read-back correctness ─────────────────────────────────────────
+            await Test_NullsReadBackCorrectly(conn);
+        }
+        catch (Exception ex)
+        {
+            Fail("FATAL", $"{ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            await conn.CloseAsync();
+        }
+
+        StateHasChanged();
+    }
+
+    // ── Table setup ───────────────────────────────────────────────────────────
+
+    private async Task SetupTable(SqliteWasmConnection c)
+    {
+        await c.ExecuteAsync("DROP TABLE IF EXISTS null_binding_test");
+        await c.ExecuteAsync(@"CREATE TABLE null_binding_test (
+                Id          INTEGER PRIMARY KEY,
+                Name        TEXT,
+                Score       REAL,
+                Tag         TEXT,
+                Amount      NUMERIC,
+                CreatedAt   TEXT,
+                ExternalId  TEXT
+            )");
+    }
+
+    // ── Individual tests ─────────────────────────────────────────────────────
+
+    // Anonymous object: { Name = (string?)null }
+    // Dapper converts the null to DBNull.Value → without the fix → {} in JS → warning
+    private async Task Test_AnonymousObjectNullString(SqliteWasmConnection c)
+    {
+        const string N = "Anonymous object — null string param";
+        try
+        {
+            await c.ExecuteAsync(
+                "INSERT INTO null_binding_test (Id, Name) VALUES (@Id, @Name)",
+                new { Id = 1, Name = (string?)null });
+            Pass(N, "INSERT completed");
+        }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    // DynamicParameters with null string
+    private async Task Test_DynamicParametersNullString(SqliteWasmConnection c)
+    {
+        const string N = "DynamicParameters — null string";
+        try
+        {
+            var p = new DynamicParameters();
+            p.Add("Id",   2);
+            p.Add("Name", (string?)null);
+            await c.ExecuteAsync(
+                "INSERT INTO null_binding_test (Id, Name) VALUES (@Id, @Name)", p);
+            Pass(N, "INSERT completed");
+        }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    // DynamicParameters with null Guid (common in DVMApp entities)
+    private async Task Test_DynamicParametersNullGuid(SqliteWasmConnection c)
+    {
+        const string N = "DynamicParameters — null Guid (ExternalId column)";
+        try
+        {
+            var p = new DynamicParameters();
+            p.Add("Id",         3);
+            p.Add("ExternalId", (Guid?)null);
+            await c.ExecuteAsync(
+                "INSERT INTO null_binding_test (Id, ExternalId) VALUES (@Id, @ExternalId)", p);
+            Pass(N, "INSERT completed");
+        }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    // DynamicParameters with null decimal (Price/Quantity on History)
+    private async Task Test_DynamicParametersNullDecimal(SqliteWasmConnection c)
+    {
+        const string N = "DynamicParameters — null decimal (Amount column)";
+        try
+        {
+            var p = new DynamicParameters();
+            p.Add("Id",     4);
+            p.Add("Amount", (decimal?)null);
+            await c.ExecuteAsync(
+                "INSERT INTO null_binding_test (Id, Amount) VALUES (@Id, @Amount)", p);
+            Pass(N, "INSERT completed");
+        }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    // DynamicParameters with null DateTime (CreationDate on History)
+    private async Task Test_DynamicParametersNullDateTime(SqliteWasmConnection c)
+    {
+        const string N = "DynamicParameters — null DateTime (CreatedAt column)";
+        try
+        {
+            var p = new DynamicParameters();
+            p.Add("Id",        5);
+            p.Add("CreatedAt", (DateTime?)null);
+            await c.ExecuteAsync(
+                "INSERT INTO null_binding_test (Id, CreatedAt) VALUES (@Id, @CreatedAt)", p);
+            Pass(N, "INSERT completed");
+        }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    // Row with several nulls at once — mirrors the DVMApp History upsert that triggered the bug
+    private async Task Test_MultipleNullsInOneInsert(SqliteWasmConnection c)
+    {
+        const string N = "Multiple nulls in one INSERT (mirrors History upsert)";
+        try
+        {
+            var p = new DynamicParameters();
+            p.Add("Id",        6);
+            p.Add("Name",      (string?)null);    // TreatmentNotes equivalent
+            p.Add("Tag",       (string?)null);    // Location equivalent
+            p.Add("Amount",    (decimal?)null);   // Price equivalent
+            p.Add("CreatedAt", (DateTime?)null);  // CreationDate equivalent
+            await c.ExecuteAsync(
+                @"INSERT INTO null_binding_test (Id, Name, Tag, Amount, CreatedAt)
+                  VALUES (@Id, @Name, @Tag, @Amount, @CreatedAt)", p);
+            Pass(N, "INSERT with 4 null params completed");
+        }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    // Verify all six rows read back with the correct NULLs
+    private async Task Test_NullsReadBackCorrectly(SqliteWasmConnection c)
+    {
+        const string N = "Read-back — all null columns are NULL in SQLite";
+        try
+        {
+            var rows = (await c.QueryAsync<NullRow>(
+                "SELECT * FROM null_binding_test ORDER BY Id")).ToList();
+
+            if (rows.Count != 6) { Fail(N, $"Expected 6 rows, got {rows.Count}"); return; }
+
+            // Every nullable column in rows 1-6 should be null (we only inserted non-nullable Id)
+            var offenders = rows.Where(r =>
+                r.Name      != null ||
+                r.Tag       != null ||
+                r.Amount    != null ||
+                r.CreatedAt != null ||
+                r.ExternalId!= null).ToList();
+
+            if (offenders.Count == 0)
+                Pass(N, "All 6 rows: nullable columns = NULL ✓");
+            else
+                Fail(N, $"{offenders.Count} row(s) had non-null values where NULL expected");
+        }
+        catch (Exception ex) { Fail(N, ex.Message); }
+    }
+
+    // ── Model ─────────────────────────────────────────────────────────────────
+
+    private class NullRow
+    {
+        public int       Id         { get; set; }
+        public string?   Name       { get; set; }
+        public double?   Score      { get; set; }
+        public string?   Tag        { get; set; }
+        public decimal?  Amount     { get; set; }
+        public DateTime? CreatedAt  { get; set; }
+        public string?   ExternalId { get; set; }
+    }
+}

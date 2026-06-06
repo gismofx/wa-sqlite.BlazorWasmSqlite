@@ -7,6 +7,7 @@ namespace wa_sqlite.BlazorWasmSqlite;
 /// <summary>
 /// Wrapper for a dictionary of sqlite query/command parameters
 /// </summary>
+[Obsolete("Use Dapper anonymous objects or DynamicParameters instead. SqliteQueryParams will be removed in a future release.", error: false)]
 public class SqliteQueryParams : IDictionary<string, object>
 {
     private Dictionary<string, object> _params = new();

@@ -1,0 +1,313 @@
+@page "/pagination-benchmark"
+@using Dapper
+@using System.Diagnostics
+@using wa_sqlite.BlazorWasmSqlite
+@using wa_sqlite.BlazorWasmSqlite.DBConnection
+
+<PageTitle>Pagination Benchmark</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge">
+    <MudText Typo="Typo.h5" Class="mb-3">Pagination Query Benchmark</MudText>
+
+    <MudPaper Class="pa-3 mb-3">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3">
+            <MudNumericField @bind-Value="_rowCount" Label="Patient rows" Min="1000" Max="100000" Step="1000" Style="width:150px" />
+            <MudNumericField @bind-Value="_pageSize" Label="Page size" Min="5" Max="100" Step="5" Style="width:120px" />
+            <MudNumericField @bind-Value="_pagesToTest" Label="Pages to test" Min="1" Max="20" Style="width:130px" />
+            <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="SeedAsync" Disabled="_busy">
+                @(_seeded ? "Re-Seed" : "Seed DB")
+            </MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="RunBenchmarkAsync"
+                       Disabled="_busy || !_seeded">
+                Run Benchmark
+            </MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="Cancel"
+                       Disabled="!_busy">
+                Cancel
+            </MudButton>
+            <MudButton Variant="Variant.Outlined" OnClick="ToggleIndexes" Disabled="_busy || !_seeded">
+                Indexes: @(_indexesOn ? "ON" : "OFF")
+            </MudButton>
+        </MudStack>
+    </MudPaper>
+
+
+    @if (!string.IsNullOrEmpty(_statusMsg))
+    {
+        <MudAlert Severity="@_alertSeverity" Class="mb-3">@_statusMsg</MudAlert>
+    }
+
+    @if (_results.Any() && _summaries.Any())
+    {
+        <MudGrid>
+            <MudItem xs="12">
+                <MudPaper Class="pa-3 mb-2">
+                    <MudText Typo="Typo.subtitle1" Class="mb-2">
+                        <b>Summary — @_rowCount rows, page size @_pageSize, indexes @(_indexesOn ? "ON" : "OFF")</b>
+                    </MudText>
+                    <MudSimpleTable Dense="true" Striped="true">
+                        <thead>
+                            <tr><th>Variant</th><th>Avg (ms)</th><th>Min (ms)</th><th>Max (ms)</th><th>p50 (ms)</th><th>p90 (ms)</th><th>Total (ms)</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var s in _summaries)
+                            {
+                                <tr>
+                                    <td><b>@s.Name</b></td>
+                                    <td>@s.Avg.ToString("F0")</td>
+                                    <td>@s.Min</td><td>@s.Max</td><td>@s.P50</td><td>@s.P90</td><td>@s.Total</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12">
+                <MudPaper Class="pa-3">
+                    <MudText Typo="Typo.subtitle1" Class="mb-2"><b>Per-page timings (ms)</b></MudText>
+                    <MudSimpleTable Dense="true" Striped="true">
+                        <thead>
+                            <tr>
+                                <th>Page</th><th>Offset</th>
+                                @foreach (var v in _variants) { <th>@v</th> }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var r in _results)
+                            {
+                                <tr>
+                                    <td>@r.Page</td><td>@r.Offset</td>
+                                    @foreach (var v in _variants)
+                                    { <td>@(r.Times.TryGetValue(v, out var t) ? t.ToString() : "-")</td> }
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    }
+</MudContainer>
+
+
+@code {
+    private int _rowCount = 32000;
+    private int _pageSize = 20;
+    private int _pagesToTest = 10;
+    private bool _seeded;
+    private bool _indexesOn;
+    private bool _busy;
+    private bool _cancelled;
+    private string _statusMsg = "";
+    private Severity _alertSeverity = Severity.Info;
+
+    private void Cancel() { _cancelled = true; }
+
+    private record PageResult(int Page, int Offset, Dictionary<string, long> Times);
+    private record Summary(string Name, double Avg, long Min, long Max, long P50, long P90, long Total);
+
+    private readonly List<string> _variants = new() { "Deferred Join (prod)", "Direct Scan" };
+    private List<PageResult> _results = new();
+    private List<Summary> _summaries = new();
+
+    private SqliteWasmConnection? _conn;
+
+    private async Task<SqliteWasmConnection> GetConn()
+    {
+        if (_conn == null)
+        {
+            _conn = new SqliteWasmConnection("BenchApp", "BenchFile");
+            await _conn.OpenAsync();
+        }
+        return _conn;
+    }
+
+    private async Task SeedAsync()
+    {
+        _busy = true; _results.Clear(); _summaries.Clear();
+        Status("Seeding..."); StateHasChanged();
+        var conn = await GetConn();
+        try
+        {
+            await conn.ExecuteAsync("PRAGMA cache_size=-65536");
+            await conn.ExecuteAsync("PRAGMA synchronous=normal");
+            await conn.ExecuteAsync("DROP VIEW  IF EXISTS PatientListModelView");
+            await conn.ExecuteAsync("DROP INDEX IF EXISTS index_patient_name");
+            await conn.ExecuteAsync("DROP INDEX IF EXISTS index_patientownership_patientid");
+            await conn.ExecuteAsync("DROP INDEX IF EXISTS index_patientownership_clientid");
+            await conn.ExecuteAsync("DROP TABLE IF EXISTS PatientOwnership");
+            await conn.ExecuteAsync("DROP TABLE IF EXISTS Patient");
+            await conn.ExecuteAsync("DROP TABLE IF EXISTS Client");
+
+            await conn.ExecuteAsync(@"CREATE TABLE Client (Id TEXT PRIMARY KEY, OwnerFirstName TEXT, OwnerLastName TEXT, FlagDelete INTEGER DEFAULT 0)");
+            await conn.ExecuteAsync(@"CREATE TABLE Patient (Id TEXT PRIMARY KEY, PatientName TEXT NOT NULL, Age TEXT, Sex TEXT, Breed TEXT, Color TEXT, BarnName TEXT, Stable TEXT, Microchip TEXT, FlagDelete INTEGER DEFAULT 0)");
+            await conn.ExecuteAsync(@"CREATE TABLE PatientOwnership (Id TEXT PRIMARY KEY, PatientId TEXT NOT NULL, ClientId TEXT NOT NULL, DateEnd TEXT, FlagDelete INTEGER DEFAULT 0)");
+            await conn.ExecuteAsync(@"CREATE VIEW PatientListModelView AS
+                SELECT O.Id, P.Id as PatientId, P.PatientName, P.Age, P.Sex, P.Breed, P.Color,
+                       P.BarnName, P.Stable, P.Microchip, P.FlagDelete,
+                       O.ClientId, C.OwnerFirstName, C.OwnerLastName
+                FROM PatientOwnership as O
+                LEFT JOIN Patient AS P ON P.Id = O.PatientId
+                LEFT JOIN Client  AS C ON C.Id = O.ClientId
+                WHERE O.DateEnd IS NULL AND O.FlagDelete = 0");
+
+            int clientCount = Math.Max(1, _rowCount / 4);
+            Status($"Seeding {clientCount} clients..."); StateHasChanged();
+            var clientIds = new List<string>(clientCount);
+            var txn = await conn.BeginTransactionAsync();
+            for (int i = 0; i < clientCount; i++)
+            {
+                var id = Guid.NewGuid().ToString(); clientIds.Add(id);
+                await conn.ExecuteAsync("INSERT INTO Client (Id,OwnerFirstName,OwnerLastName) VALUES (@Id,@F,@L)",
+                    new { Id = id, F = $"First{i}", L = $"Last{i % 500}" });
+                if (i % 500 == 499) { await txn.CommitAsync(); txn = await conn.BeginTransactionAsync(); }
+            }
+            await txn.CommitAsync();
+
+            Status($"Seeding {_rowCount} patients..."); StateHasChanged();
+            var names = GenerateNames(_rowCount);
+            txn = await conn.BeginTransactionAsync();
+            for (int i = 0; i < _rowCount; i++)
+            {
+                var patId = Guid.NewGuid().ToString();
+                await conn.ExecuteAsync("INSERT INTO Patient (Id,PatientName,Age,Sex,Breed,Color,BarnName,Stable,Microchip) VALUES (@Id,@N,@A,@S,@B,@C,@Bn,@St,@M)",
+                    new { Id=patId, N=names[i], A=$"{(i%25)+1}yr", S=(i%2==0?"M":"F"), B=Breeds[i%Breeds.Length], C=Colors[i%Colors.Length], Bn=$"Barn{i%20}", St=$"Stall{i%50}", M=$"{100000000000000+i:D15}" });
+                await conn.ExecuteAsync("INSERT INTO PatientOwnership (Id,PatientId,ClientId) VALUES (@Id,@P,@C)",
+                    new { Id=Guid.NewGuid().ToString(), P=patId, C=clientIds[i % clientIds.Count] });
+                if (i % 500 == 499) { await txn.CommitAsync(); txn = await conn.BeginTransactionAsync(); }
+            }
+            await txn.CommitAsync();
+            await conn.ExecuteAsync("PRAGMA synchronous=full");
+            await conn.ExecuteAsync("PRAGMA cache_size=-2000");
+            _seeded = true; _indexesOn = false;
+            Status($"Seeded {_rowCount} patients, {clientCount} clients. Indexes OFF.", Severity.Success);
+        }
+        catch (Exception ex) { Status($"Seed error: {ex.Message}", Severity.Error); }
+        finally { _busy = false; StateHasChanged(); }
+    }
+
+    private async Task ToggleIndexes()
+    {
+        _busy = true; StateHasChanged();
+        var conn = await GetConn();
+        if (_indexesOn)
+        {
+            await conn.ExecuteAsync("DROP INDEX IF EXISTS index_patient_name");
+            await conn.ExecuteAsync("DROP INDEX IF EXISTS index_patientownership_patientid");
+            await conn.ExecuteAsync("DROP INDEX IF EXISTS index_patientownership_clientid");
+            _indexesOn = false; Status("Indexes dropped.", Severity.Warning);
+        }
+        else
+        {
+            Status("Building indexes..."); StateHasChanged();
+            await conn.ExecuteAsync("CREATE INDEX index_patient_name ON Patient(FlagDelete, PatientName, Id)");
+            await conn.ExecuteAsync("CREATE INDEX index_patientownership_patientid ON PatientOwnership(PatientId, FlagDelete, DateEnd)");
+            await conn.ExecuteAsync("CREATE INDEX index_patientownership_clientid ON PatientOwnership(ClientId)");
+            _indexesOn = true; Status("Indexes created.", Severity.Success);
+        }
+        _busy = false; StateHasChanged();
+    }
+
+    private async Task RunBenchmarkAsync()
+    {
+        _busy = true; _cancelled = false; _results.Clear(); _summaries.Clear();
+        Status("Running..."); StateHasChanged();
+        var conn = await GetConn();
+        await conn.ExecuteAsync("PRAGMA cache_size=-32768");
+        var pages = DistributePages(_pagesToTest, _rowCount, _pageSize);
+        var timings = _variants.ToDictionary(v => v, _ => new List<long>());
+        try
+        {
+            foreach (var page in pages)
+            {
+                var offset = (page - 1) * _pageSize;
+                var row = new PageResult(page, offset, new Dictionary<string, long>());
+
+                // Deferred Join (production pattern against view)
+                var sw = Stopwatch.StartNew();
+                await conn.QueryAsync<PatientRow>(@"
+                    SELECT c.* FROM PatientListModelView AS c
+                    INNER JOIN (
+                        SELECT id FROM PatientListModelView
+                        WHERE CONCAT_WS('|',PatientName,BarnName,Stable,Microchip) LIKE @query
+                          AND FlagDelete = @fd
+                        ORDER BY PatientName, Id ASC
+                        LIMIT @lim OFFSET @off
+                    ) AS tmp USING (id)
+                    ORDER BY PatientName, Id ASC",
+                    new { query = "%", fd = 0, lim = _pageSize, off = offset });
+                sw.Stop();
+                row.Times["Deferred Join (prod)"] = sw.ElapsedMilliseconds;
+                timings["Deferred Join (prod)"].Add(sw.ElapsedMilliseconds);
+
+                // Direct Scan
+                sw.Restart();
+                await conn.QueryAsync<PatientRow>(@"
+                    SELECT * FROM PatientListModelView
+                    WHERE FlagDelete = @fd
+                    ORDER BY PatientName, Id ASC
+                    LIMIT @lim OFFSET @off",
+                    new { fd = 0, lim = _pageSize, off = offset });
+                sw.Stop();
+                row.Times["Direct Scan"] = sw.ElapsedMilliseconds;
+                timings["Direct Scan"].Add(sw.ElapsedMilliseconds);
+
+                _results.Add(row);
+                Status($"Page {page} (offset {offset}) — Deferred: {row.Times["Deferred Join (prod)"]}ms | Direct: {row.Times["Direct Scan"]}ms");
+                StateHasChanged();
+                await Task.Delay(10);
+
+                if (_cancelled) { Status("Cancelled.", Severity.Warning); break; }
+            }
+            _summaries = _variants.Select(v =>
+            {
+                var t = timings[v].OrderBy(x => x).ToList();
+                return new Summary(v, t.Average(), t.First(), t.Last(), t[t.Count/2], t[(int)(t.Count*0.9)], t.Sum());
+            }).ToList();
+            Status($"Done. {_rowCount} rows, page {_pageSize}, indexes {(_indexesOn ? "ON" : "OFF")}.", Severity.Success);
+        }
+        catch (Exception ex) { Status($"Error: {ex.Message}", Severity.Error); }
+        finally { _busy = false; StateHasChanged(); }
+    }
+
+    private void Status(string msg, Severity sev = Severity.Info) { _statusMsg = msg; _alertSeverity = sev; }
+
+    private static List<int> DistributePages(int count, int totalRows, int pageSize)
+    {
+        int totalPages = (int)Math.Ceiling((double)totalRows / pageSize);
+        if (count == 1) return new List<int> { 1 };
+        return Enumerable.Range(0, count)
+            .Select(i => (int)Math.Round(1.0 + (totalPages - 1.0) * i / (count - 1)))
+            .Distinct().OrderBy(x => x).ToList();
+    }
+
+    private static List<string> GenerateNames(int count)
+    {
+        var first = new[] { "Storm","Thunder","Lightning","Shadow","Spirit","Blaze","Misty","Comet","Arrow","Dusty","Rebel","Scout","Ace","Copper","Ranger","Dakota","Jasper","Cody","Maverick","Rio" };
+        var last  = new[] { "Runner","Star","Dancer","Chaser","Jumper","Skipper","Trotter","Galloper","Racer","Pacer","Blazer","Drifter","Strider","Roamer","Rider","Flyer","Leaper","Sprinter","Cantor","Loper" };
+        return Enumerable.Range(0, count)
+            .Select(i => $"{first[i % first.Length]} {last[(i / first.Length) % last.Length]} {i:D5}")
+            .ToList();
+    }
+
+    private static readonly string[] Breeds = { "Thoroughbred","Quarter Horse","Arabian","Warmblood","Appaloosa","Paint","Morgan","Andalusian","Draft","Mustang" };
+    private static readonly string[] Colors  = { "Bay","Chestnut","Black","Grey","Roan","Palomino","Dun","Buckskin","Pinto","Cremello" };
+
+    private class PatientRow
+    {
+        public string Id { get; set; } = "";
+        public string PatientId { get; set; } = "";
+        public string PatientName { get; set; } = "";
+        public string Age { get; set; } = "";
+        public string Sex { get; set; } = "";
+        public string Breed { get; set; } = "";
+        public string Color { get; set; } = "";
+        public string BarnName { get; set; } = "";
+        public string Stable { get; set; } = "";
+        public string Microchip { get; set; } = "";
+        public bool FlagDelete { get; set; }
+        public string ClientId { get; set; } = "";
+        public string OwnerFirstName { get; set; } = "";
+        public string OwnerLastName { get; set; } = "";
+    }
+}
