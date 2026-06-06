@@ -22,9 +22,11 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
     /// </remarks>
     public class SqliteTableCreator
     {
+        /// <summary>DDL generation options for this instance.</summary>
         public TableCreatorOptions Options { get; init; }
 
-        public SqliteTableCreator(TableCreatorOptions options = null)
+        /// <summary>Initialises a new instance with the given options, or defaults if <paramref name="options"/> is <c>null</c>.</summary>
+        public SqliteTableCreator(TableCreatorOptions? options = null)
         {
             Options = options ?? new TableCreatorOptions();
         }
@@ -142,7 +144,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
                 .Where(x => x.att?.Index == true)
                 .Select(x =>
                 {
-                    var unique = x.att.Unique ? "UNIQUE " : string.Empty;
+                    var unique = x.att!.Unique ? "UNIQUE " : string.Empty;
                     return $"CREATE {unique}INDEX IF NOT EXISTS ind_{x.prop.Name}_{tableName} ON {tableName} ({x.prop.Name})";
                 })
                 .ToList();

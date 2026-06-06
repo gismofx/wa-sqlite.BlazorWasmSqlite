@@ -1,6 +1,7 @@
 using System;
 using System.Data;
 using System.Data.Common;
+using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -10,6 +11,7 @@ namespace wa_sqlite.BlazorWasmSqlite.DBConnection;
 /// ADO.NET DbConnection backed by <see cref="SqliteJsInterop"/> and Web Worker.
 /// Async-only — sync <see cref="Open"/> throws <see cref="NotSupportedException"/>.
 /// </summary>
+[SupportedOSPlatform("browser")]
 public sealed class SqliteWasmConnection : DbConnection
 {
     private readonly string _dbName;
@@ -46,10 +48,19 @@ public sealed class SqliteWasmConnection : DbConnection
 
     // ── Properties ─────────────────────────────────────────────────────
 
+#pragma warning disable CS8764 // Nullability of return type doesn't match overridden member
+#pragma warning disable CS8765 // Nullability of parameter 'value' doesn't match overridden member
+    /// <inheritdoc/>
     public override string ConnectionString { get; set; } = string.Empty;
+#pragma warning restore CS8764
+#pragma warning restore CS8765
+    /// <inheritdoc/>
     public override string Database => _dbName;
+    /// <inheritdoc/>
     public override string DataSource => _fileName;
+    /// <inheritdoc/>
     public override string ServerVersion => "wa-sqlite";
+    /// <inheritdoc/>
     public override ConnectionState State => _state;
 
     // ── Async (primary path) ──────────────────────────────────────────
@@ -94,6 +105,7 @@ public sealed class SqliteWasmConnection : DbConnection
 
     // ── Transaction ───────────────────────────────────────────────────
 
+    /// <inheritdoc/>
     protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel) =>
         throw new NotSupportedException("Use BeginTransactionAsync.");
 
@@ -110,6 +122,7 @@ public sealed class SqliteWasmConnection : DbConnection
 
     // ── Command factory ───────────────────────────────────────────────
 
+    /// <inheritdoc/>
     protected override DbCommand CreateDbCommand() =>
         new SqliteWasmCommand { Connection = this };
 
@@ -119,9 +132,15 @@ public sealed class SqliteWasmConnection : DbConnection
 
     // ── Sync — not supported in WASM ──────────────────────────────────
 
+    /// <summary>Not supported. Use <see cref="OpenAsync(System.Threading.CancellationToken)"/>.</summary>
     public override void Open() =>
         throw new NotSupportedException("Use OpenAsync. Sync operations are not supported in WASM.");
 
+    /// <summary>
+    /// No-op — <see cref="SqliteWasmConnection"/> is long-lived.
+    /// Dapper calls this after queries; passing an already-open connection suppresses it.
+    /// Use <see cref="CloseAsync"/> to explicitly close.
+    /// </summary>
     public override void Close()
     {
         // Dapper calls sync Close() after queries when it opened the connection.
@@ -133,6 +152,7 @@ public sealed class SqliteWasmConnection : DbConnection
                           "passing it to Dapper to avoid this call.");
     }
 
+    /// <inheritdoc/>
     public override void ChangeDatabase(string databaseName) =>
         throw new NotSupportedException();
 }

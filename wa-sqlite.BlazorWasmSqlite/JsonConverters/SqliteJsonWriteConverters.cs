@@ -28,7 +28,7 @@ internal sealed class SqliteDateTimeWriteConverter : JsonConverter<DateTime>
 }
 
 /// <summary>
-/// Writes <see cref="DateTime?"/> as sortable ISO 8601 or JSON null.
+/// Writes <see cref="Nullable{T}"/> DateTime as sortable ISO 8601 or JSON null.
 /// Matches <c>NullableDateTimeHandler.SetValue</c>.
 /// </summary>
 internal sealed class SqliteNullableDateTimeWriteConverter : JsonConverter<DateTime?>
@@ -58,7 +58,7 @@ internal sealed class SqliteDateTimeOffsetWriteConverter : JsonConverter<DateTim
 }
 
 /// <summary>
-/// Writes <see cref="DateTimeOffset?"/> as UTC-normalized ISO 8601 + "Z" or JSON null.
+/// Writes <see cref="Nullable{T}"/> DateTimeOffset as UTC-normalized ISO 8601 + "Z" or JSON null.
 /// Matches <c>NullableDateTimeOffsetHandler.SetValue</c>.
 /// </summary>
 internal sealed class SqliteNullableDateTimeOffsetWriteConverter : JsonConverter<DateTimeOffset?>

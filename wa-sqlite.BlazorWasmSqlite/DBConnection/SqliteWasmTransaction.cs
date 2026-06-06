@@ -1,6 +1,7 @@
 using System;
 using System.Data;
 using System.Data.Common;
+using System.Runtime.Versioning;
 using System.Threading.Tasks;
 
 namespace wa_sqlite.BlazorWasmSqlite.DBConnection;
@@ -8,6 +9,7 @@ namespace wa_sqlite.BlazorWasmSqlite.DBConnection;
 /// <summary>
 /// Transaction backed by SQL BEGIN/COMMIT/ROLLBACK via <see cref="SqliteJsInterop"/>.
 /// </summary>
+[SupportedOSPlatform("browser")]
 public sealed class SqliteWasmTransaction : DbTransaction
 {
     private readonly SqliteWasmConnection _connection;
@@ -18,7 +20,9 @@ public sealed class SqliteWasmTransaction : DbTransaction
         _connection = connection;
     }
 
+    /// <inheritdoc/>
     protected override DbConnection DbConnection => _connection;
+    /// <inheritdoc/>
     public override IsolationLevel IsolationLevel => IsolationLevel.Serializable;
 
     internal async Task BeginAsync()
@@ -27,12 +31,13 @@ public sealed class SqliteWasmTransaction : DbTransaction
             _connection.ConnectionHandle, "BEGIN TRANSACTION", null);
     }
 
-    public override void Commit() =>
-        throw new NotSupportedException("Use CommitAsync.");
+    /// <summary>Not supported — use <see cref="CommitAsync"/>.</summary>
+    public override void Commit() => throw new NotSupportedException("Use CommitAsync.");
 
-    public override void Rollback() =>
-        throw new NotSupportedException("Use RollbackAsync.");
+    /// <summary>Not supported — use <see cref="RollbackAsync"/>.</summary>
+    public override void Rollback() => throw new NotSupportedException("Use RollbackAsync.");
 
+    /// <summary>Commits the transaction. No-op if already completed.</summary>
     public async Task CommitAsync()
     {
         if (_completed) return;
@@ -44,6 +49,7 @@ public sealed class SqliteWasmTransaction : DbTransaction
         _completed = true;
     }
 
+    /// <summary>Rolls back the transaction. No-op if already completed.</summary>
     public async Task RollbackAsync()
     {
         if (_completed) return;
@@ -52,6 +58,7 @@ public sealed class SqliteWasmTransaction : DbTransaction
         _completed = true;
     }
 
+    /// <inheritdoc/>
     public override async ValueTask DisposeAsync()
     {
         if (!_completed)

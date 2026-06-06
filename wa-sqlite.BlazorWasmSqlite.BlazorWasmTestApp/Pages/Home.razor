@@ -29,7 +29,7 @@
                 <MudDivider />
                 @foreach (var table in Tables)
                 {
-                    <MudListItem Value="@table" Text="@table.Name" Icon="@Icons.Material.Filled.TableRows" ExpandedChanged="@(async (b) => await LoadColumns(table.Name))">
+                    <MudListItem Value="@table" Text="@table.Name" Icon="@Icons.Material.Filled.TableRows" ExpandedChanged="@(async (b) => await LoadColumns(table.Name!))">
                      <NestedList>
                          @foreach (var col in table.Columns)
                             {
@@ -128,7 +128,7 @@
             Email TEXT UNIQUE,
             epochTimeSeconds NUMERIC)");
 
-        var rows = await conn.ExecuteAsync(@"INSERT OR IGNORE INTO contacts
+        var rows = await conn.ExecuteAsync(@"INSERT OR REPLACE INTO contacts
             (id, FirstName, LastName, Email, EpochTimeSeconds) VALUES
             (1,'Bob','Dob','bob@email.com',1),
             (2,'Tina','Tuna','tina@email.com',2),
@@ -142,12 +142,12 @@
     private async Task UpsertClick()
     {
         var conn = await EnsureConnectionAsync();
-        var models = new List<model>
+        var models = new List<ContactModel>
         {
-            new model { Id = 10, Email = "grog@bemail.com",  FirstName = "Grog",  LastName = "Dog",  EpochTimeSeconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() },
-            new model { Id = 11, Email = "grog2@bemail2.com", FirstName = "Grog2", LastName = "Dog2", EpochTimeSeconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }
+            new ContactModel { Id = 10, Email = "grog@bemail.com",  FirstName = "Grog",  LastName = "Dog",  EpochTimeSeconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() },
+            new ContactModel { Id = 11, Email = "grog2@bemail2.com", FirstName = "Grog2", LastName = "Dog2", EpochTimeSeconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }
         };
-        var changes = await conn.UpsertAsync<model>("Contacts", models);
+        var changes = await conn.UpsertAsync<ContactModel>("Contacts", models);
         QueryResult = $"Upserted {changes} row(s).";
     }
 

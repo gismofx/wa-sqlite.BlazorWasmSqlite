@@ -15,11 +15,11 @@ namespace wa_sqlite.BlazorWasmSqlite.DBConnection
         /// The IndexedDB VFS file name — used as the IDB database key.
         /// Must match the <c>fileName</c> value passed to every open call for the same database.
         /// </summary>
-        public string Filename { get; init; }
+        public required string Filename { get; init; }
 
         /// <summary>
         /// The logical database name passed to <c>sqlite3_open_v2</c>.
         /// </summary>
-        public string DatabaseName { get; init; }
+        public required string DatabaseName { get; init; }
     }
 }

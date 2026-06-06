@@ -39,7 +39,7 @@ public static class SqliteWorkerPayloadBuilder
     /// <summary>
     /// Column name cache keyed by entity type.
     /// Populated on first call per type when no custom <see cref="JsonSerializerOptions"/> are provided.
-    /// Eliminates <see cref="JsonDocument.Parse"/> overhead on every upsert call — critical for
+    /// Eliminates repeated <see cref="JsonDocument"/> parse overhead on every upsert call — critical for
     /// single-record upserts that would otherwise pay full parse cost on every operation.
     /// </summary>
     /// <remarks>
@@ -91,6 +91,7 @@ public static class SqliteWorkerPayloadBuilder
     /// </param>
     /// <param name="rowsPerStatement">Number of rows per INSERT statement (default 100).</param>
     /// <param name="primaryKey">Primary key column name (default <c>"Id"</c>).</param>
+    /// <param name="excludeColumns">Optional set of column names to exclude (e.g. server-only columns absent from the client schema).</param>
     /// <returns>
     /// <c>\0</c>-delimited payload string ready to pass to
     /// <see cref="SqliteJsInterop.BulkInsertRawAsync"/>.

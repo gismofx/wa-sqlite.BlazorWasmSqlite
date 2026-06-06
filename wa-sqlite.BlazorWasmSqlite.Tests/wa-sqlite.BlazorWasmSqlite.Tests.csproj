@@ -4,6 +4,10 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- This project tests browser-targeted code. CA1416 (platform-specific API) is expected
+         and intentional — the test runner is not a browser, but these are valid unit tests
+         of internal browser-only logic (e.g. SqliteWasmCommand.Coerce). -->
+    <NoWarn>CA1416</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

@@ -1,17 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Drawing;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System;
 
-namespace wa_sqlite.BlazorWasmSqlite.Extensions
+namespace wa_sqlite.BlazorWasmSqlite.Extensions;
+
+/// <summary>
+/// Placeholder for SQLite view DDL helpers.
+/// </summary>
+public class SqliteViewCreator
 {
-    public class SqliteViewCreator
-    {
-        public SqliteViewCreator()
-        {
-            
-        }
-    }
+    /// <summary>Initialises a new instance of <see cref="SqliteViewCreator"/>.</summary>
+    public SqliteViewCreator() { }
 }

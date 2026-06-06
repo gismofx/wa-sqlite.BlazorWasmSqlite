@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
 using System.Linq;
+using System.Runtime.Versioning;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,18 +15,22 @@ namespace wa_sqlite.BlazorWasmSqlite.DBConnection;
 /// DbCommand implementation backed by <see cref="SqliteJsInterop"/>.
 /// Async-only — sync methods throw <see cref="NotSupportedException"/>.
 /// </summary>
+[SupportedOSPlatform("browser")]
 public sealed class SqliteWasmCommand : DbCommand
 {
     private readonly SqliteWasmParameterCollection _parameters = new();
     private SqliteWasmConnection? _connection;
 
+    /// <summary>Initialises a command with no text or connection.</summary>
     public SqliteWasmCommand() { }
 
+    /// <summary>Initialises a command with the given SQL text.</summary>
     public SqliteWasmCommand(string commandText)
     {
         CommandText = commandText;
     }
 
+    /// <summary>Initialises a command with the given SQL text and connection.</summary>
     public SqliteWasmCommand(string commandText, SqliteWasmConnection connection)
     {
         CommandText = commandText;
@@ -34,25 +39,39 @@ public sealed class SqliteWasmCommand : DbCommand
 
     // ── Properties ─────────────────────────────────────────────────────
 
+#pragma warning disable CS8764 // Nullability of return type doesn't match overridden member
+#pragma warning disable CS8765 // Nullability of parameter 'value' doesn't match overridden member
+    /// <inheritdoc/>
     public override string CommandText { get; set; } = string.Empty;
+#pragma warning restore CS8764
+#pragma warning restore CS8765
+    /// <inheritdoc/>
     public override int CommandTimeout { get; set; } = 30;
+    /// <inheritdoc/>
     public override CommandType CommandType { get; set; } = CommandType.Text;
+    /// <inheritdoc/>
     public override bool DesignTimeVisible { get; set; }
+    /// <inheritdoc/>
     public override UpdateRowSource UpdatedRowSource { get; set; }
 
+    /// <inheritdoc/>
     protected override DbConnection? DbConnection
     {
         get => _connection;
         set => _connection = (SqliteWasmConnection?)value;
     }
 
+    /// <inheritdoc/>
     protected override DbParameterCollection DbParameterCollection => _parameters;
+    /// <inheritdoc/>
     protected override DbTransaction? DbTransaction { get; set; }
 
     // ── Parameter helpers ──────────────────────────────────────────────
 
+    /// <summary>Typed access to the parameter collection.</summary>
     public new SqliteWasmParameterCollection Parameters => _parameters;
 
+    /// <inheritdoc/>
     protected override DbParameter CreateDbParameter() => new SqliteWasmParameter();
 
     private string? SerializeParameters()
@@ -182,6 +201,7 @@ public sealed class SqliteWasmCommand : DbCommand
 
     // ── Async execution (primary path) ─────────────────────────────────
 
+    /// <inheritdoc/>
     public override async Task<int> ExecuteNonQueryAsync(CancellationToken ct)
     {
         var workerLock = _connection!.WorkerLock;
@@ -201,6 +221,7 @@ public sealed class SqliteWasmCommand : DbCommand
         }
     }
 
+    /// <inheritdoc/>
     public override async Task<object?> ExecuteScalarAsync(CancellationToken ct)
     {
         var workerLock = _connection!.WorkerLock;
@@ -227,6 +248,7 @@ public sealed class SqliteWasmCommand : DbCommand
         }
     }
 
+    /// <inheritdoc/>
     protected override async Task<DbDataReader> ExecuteDbDataReaderAsync(
         CommandBehavior behavior, CancellationToken ct)
     {
@@ -253,15 +275,20 @@ public sealed class SqliteWasmCommand : DbCommand
 
     // ── Sync methods — not supported in WASM ───────────────────────────
 
+    /// <summary>Not supported. Use <see cref="ExecuteNonQueryAsync(System.Threading.CancellationToken)"/>.</summary>
     public override int ExecuteNonQuery() =>
         throw new NotSupportedException("Use ExecuteNonQueryAsync. Sync operations are not supported in WASM.");
 
+    /// <summary>Not supported. Use <see cref="ExecuteScalarAsync(System.Threading.CancellationToken)"/>.</summary>
     public override object? ExecuteScalar() =>
         throw new NotSupportedException("Use ExecuteScalarAsync. Sync operations are not supported in WASM.");
 
+    /// <summary>Not supported. Use <see cref="ExecuteDbDataReaderAsync(CommandBehavior,CancellationToken)"/>.</summary>
     protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior) =>
         throw new NotSupportedException("Use ExecuteReaderAsync. Sync operations are not supported in WASM.");
 
+    /// <inheritdoc/>
     public override void Cancel() { }
+    /// <inheritdoc/>
     public override void Prepare() { }
 }

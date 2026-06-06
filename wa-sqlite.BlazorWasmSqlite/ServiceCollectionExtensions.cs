@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace wa_sqlite.BlazorWasmSqlite
 {
+    /// <summary>Extension methods for registering wa-sqlite services.</summary>
     public static class ServiceCollectionExtensions
     {
         /// <summary>

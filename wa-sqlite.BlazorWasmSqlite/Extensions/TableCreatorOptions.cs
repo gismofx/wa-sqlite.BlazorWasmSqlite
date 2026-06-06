@@ -6,6 +6,9 @@ using System.Threading.Tasks;
 
 namespace wa_sqlite.BlazorWasmSqlite.Extensions
 {
+    /// <summary>
+    /// Options that control DDL generation by <see cref="SqliteTableCreator"/>.
+    /// </summary>
     public class TableCreatorOptions
     {
         /// <summary>

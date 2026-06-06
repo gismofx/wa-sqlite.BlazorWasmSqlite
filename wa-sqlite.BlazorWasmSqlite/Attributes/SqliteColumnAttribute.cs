@@ -24,11 +24,11 @@ namespace wa_sqlite.BlazorWasmSqlite.Attributes
     /// Configures how a property maps to a SQLite column during table creation and data operations.
     /// </summary>
     /// <remarks>
-    /// When this attribute is absent, <see cref="SqliteTableCreator"/> infers sensible defaults:
+    /// When this attribute is absent, <see cref="Extensions.SqliteTableCreator"/> infers sensible defaults:
     /// <list type="bullet">
-    ///   <item><description>Column type is derived from the C# property type (see <see cref="SqliteTableCreator.GetSqliteColumnFromType"/>).</description></item>
+    ///   <item><description>Column type is derived from the C# property type (see <see cref="Extensions.SqliteTableCreator.GetSqliteColumnFromType"/>).</description></item>
     ///   <item><description>Nullability is inferred: value types are <c>NOT NULL</c>; reference types and <c>Nullable&lt;T&gt;</c> are nullable.</description></item>
-    ///   <item><description>A safe <c>DEFAULT</c> value is inferred for <c>NOT NULL</c> columns (see <see cref="SqliteTableCreator.InferDefaultValue"/>).</description></item>
+    ///   <item><description>A safe <c>DEFAULT</c> value is inferred for <c>NOT NULL</c> columns (see <see cref="Extensions.SqliteTableCreator.InferDefaultValue"/>).</description></item>
     /// </list>
     /// Apply this attribute when you need to override any of these defaults.
     /// </remarks>

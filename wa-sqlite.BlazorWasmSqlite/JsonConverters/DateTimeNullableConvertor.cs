@@ -5,7 +5,7 @@ namespace wa_sqlite.BlazorWasmSqlite.JsonConverters;
 
 /// <summary>
 /// Converts nullable DateTime values stored in SQLite as either Unix epoch seconds (legacy)
-/// or ISO 8601 strings (BulkInsertRaw / seeded data) to <see cref="DateTime?"/>.
+/// or ISO 8601 strings (BulkInsertRaw / seeded data) to <see cref="Nullable{T}"/> DateTime.
 /// </summary>
 internal class DateTimeNullableConvertor : JsonConverter<DateTime?>
 {

@@ -94,10 +94,30 @@ var count = await conn.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM Users");
 
 ### Transactions
 
+Pass `transaction: txn` to each Dapper operation so it is enlisted in the transaction. Use `await using` for automatic rollback if the block exits without a commit.
+
 ```csharp
-var txn = await conn.BeginTransactionAsync();
-await conn.ExecuteAsync("INSERT INTO ...");
-await txn.CommitAsync(); // or txn.RollbackAsync()
+await using var txn = await conn.BeginTransactionAsync();
+try
+{
+    await conn.ExecuteAsync(
+        "INSERT INTO Users (Id, Name) VALUES (@Id, @Name)",
+        new { Id = Guid.NewGuid().ToString(), Name = "Alice" },
+        transaction: txn);
+
+    await conn.ExecuteAsync(
+        "INSERT INTO Users (Id, Name) VALUES (@Id, @Name)",
+        new { Id = Guid.NewGuid().ToString(), Name = "Bob" },
+        transaction: txn);
+
+    await txn.CommitAsync();
+}
+catch
+{
+    await txn.RollbackAsync();
+    throw;
+}
+// DisposeAsync also rolls back automatically if CommitAsync was never reached
 ```
 
 ### Upsert Extension

@@ -1,0 +1,44 @@
+name: Publish NuGet Package
+
+on:
+  release:
+    types: [published]   # Trigger from GitHub web UI: Releases → Draft new release → Publish
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # Required for NuGet trusted publishing OIDC
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Pack
+        run: >
+          dotnet pack wa-sqlite.BlazorWasmSqlite/wa-sqlite.BlazorWasmSqlite.csproj
+          -c Release
+          -p:PackageVersion=${{ steps.version.outputs.VERSION }}
+          --output ./nupkg
+
+      - name: NuGet login (OIDC → temporary API key)
+        uses: NuGet/login@v1
+        with:
+          user: gismofx
+
+      - name: Push to NuGet
+        run: dotnet nuget push ./nupkg/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate

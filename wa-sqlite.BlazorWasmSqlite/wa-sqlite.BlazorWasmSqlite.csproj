@@ -6,6 +6,22 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>wa_sqlite.BlazorWasmSqlite</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>wa-sqlite.BlazorWasmSqlite</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>gismofx</Authors>
+    <Copyright>Copyright © 2026 gismofx</Copyright>
+    <Description>Blazor WebAssembly SQLite library backed by IndexedDB, running off the main thread in a Web Worker. Built on @journeyapps/wa-sqlite with Dapper support. Includes automatic JSPI/Asyncify detection for optimal browser compatibility.</Description>
+    <PackageTags>blazor;wasm;sqlite;indexeddb;wa-sqlite;dapper;offline;webassembly;browser</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+    <PackageProjectUrl>https://github.com/gismofx/wa-sqlite.BlazorWasmSqlite</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/gismofx/wa-sqlite.BlazorWasmSqlite</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
   </PropertyGroup>
 
 
@@ -14,7 +30,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Dapper" Version="2.1.72" />
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\LICENSE.txt" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.0.4" />
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="8.0.11" />
   </ItemGroup>
 

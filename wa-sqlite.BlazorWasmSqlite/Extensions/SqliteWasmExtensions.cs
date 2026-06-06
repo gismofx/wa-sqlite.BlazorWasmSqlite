@@ -5,6 +5,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 using System.Data;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,6 +14,10 @@ using wa_sqlite.BlazorWasmSqlite.DBConnection;
 
 namespace wa_sqlite.BlazorWasmSqlite.Extensions
 {
+    /// <summary>
+    /// Extension methods for <see cref="DBConnection.SqliteWasmConnection"/> and static
+    /// utility helpers used by the wa-sqlite library internals.
+    /// </summary>
     public static class SqliteWasmExtensions
     {
         private static readonly ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>> KeyProperties = new ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>>();
@@ -76,12 +81,12 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
 
         private static List<PropertyInfo> ComputedPropertiesCache(Type type)
         {
-            if (ComputedProperties.TryGetValue(type.TypeHandle, out IEnumerable<PropertyInfo> pi))
+            if (ComputedProperties.TryGetValue(type.TypeHandle, out IEnumerable<PropertyInfo>? pi))
             {
                 return pi.ToList();
             }
 
-            var computedProperties = TypePropertiesCache(type).Where(p => p.GetCustomAttributes(true).Any(a => a.GetType().Name == "ComputedAttribute")).ToList();///*Any(a => a is ComputedAttribute)).ToList();
+            var computedProperties = TypePropertiesCache(type).Where(p => p.GetCustomAttributes(true).Any(a => a.GetType().Name == "ComputedAttribute")).ToList();
 
             ComputedProperties[type.TypeHandle] = computedProperties;
             return computedProperties;
@@ -96,26 +101,22 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
         /// <summary>Resolves the SQLite table name for <paramref name="type"/> from a <c>[Table]</c> attribute, or falls back to <c>TypeName + "s"</c>.</summary>
         public static string GetTableName(Type type)
         {
-            if (TypeTableName.TryGetValue(type.TypeHandle, out string name)) return name;
+            if (TypeTableName.TryGetValue(type.TypeHandle, out string? name)) return name;
 
-            if (false) return "";
+            //NOTE: This as dynamic trick falls back to handle both our own Table-attribute as well as the one in EntityFramework
+            var tableAttrName =
+                type.GetCustomAttribute<TableAttribute>(false)?.Name
+                ?? (type.GetCustomAttributes(false).FirstOrDefault(attr => attr.GetType().Name == "TableAttribute") as dynamic)?.Name;
+
+            if (tableAttrName != null)
+            {
+                name = (string)tableAttrName;
+            }
             else
             {
-                //NOTE: This as dynamic trick falls back to handle both our own Table-attribute as well as the one in EntityFramework 
-                var tableAttrName =
-                    type.GetCustomAttribute<TableAttribute>(false)?.Name
-                    ?? (type.GetCustomAttributes(false).FirstOrDefault(attr => attr.GetType().Name == "TableAttribute") as dynamic)?.Name;
-
-                if (tableAttrName != null)
-                {
-                    name = tableAttrName;
-                }
-                else
-                {
-                    name = type.Name + "s";
-                    if (type.IsInterface && name.StartsWith("I"))
-                        name = name.Substring(1);
-                }
+                name = type.Name + "s";
+                if (type.IsInterface && name.StartsWith("I"))
+                    name = name.Substring(1);
             }
 
             TypeTableName[type.TypeHandle] = name;
@@ -138,6 +139,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
         /// <param name="rowsPerStatement">Rows per INSERT statement (default 100).</param>
         /// <param name="ct">Cancellation token.</param>
         /// <returns>Total rows affected.</returns>
+        [SupportedOSPlatform("browser")]
         public static async Task<int> UpsertAsync<T>(
             this SqliteWasmConnection connection,
             string tableName,
@@ -178,6 +180,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
         /// The returned <see cref="SqliteTableInfo.Columns"/> collection is empty;
         /// call <see cref="QueryTableSchemaAsync"/> per table to populate it.
         /// </summary>
+        [SupportedOSPlatform("browser")]
         public static async Task<IEnumerable<SqliteTableInfo>> QueryAllTablesAsync(
             this SqliteWasmConnection connection)
         {
@@ -190,6 +193,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
         /// <summary>
         /// Returns column metadata for <paramref name="tableName"/> via <c>PRAGMA table_info</c>.
         /// </summary>
+        [SupportedOSPlatform("browser")]
         public static async Task<IEnumerable<SqliteColumnInfo>> QueryTableSchemaAsync(
             this SqliteWasmConnection connection, string tableName)
         {
@@ -199,7 +203,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
 
         private static List<PropertyInfo> ExplicitKeyPropertiesCache(Type type)
         {
-            if (ExplicitKeyProperties.TryGetValue(type.TypeHandle, out IEnumerable<PropertyInfo> pi))
+            if (ExplicitKeyProperties.TryGetValue(type.TypeHandle, out IEnumerable<PropertyInfo>? pi))
             {
                 return pi.ToList();
             }
@@ -212,7 +216,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
 
         private static List<PropertyInfo> KeyPropertiesCache(Type type)
         {
-            if (KeyProperties.TryGetValue(type.TypeHandle, out IEnumerable<PropertyInfo> pi))
+            if (KeyProperties.TryGetValue(type.TypeHandle, out IEnumerable<PropertyInfo>? pi))
             {
                 return pi.ToList();
             }
@@ -235,7 +239,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
 
         private static List<PropertyInfo> TypePropertiesCache(Type type)
         {
-            if (TypeProperties.TryGetValue(type.TypeHandle, out IEnumerable<PropertyInfo> pis))
+            if (TypeProperties.TryGetValue(type.TypeHandle, out IEnumerable<PropertyInfo>? pis))
             {
                 return pis.ToList();
             }
@@ -255,11 +259,11 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             if (attributes.Any())
             {
                 var writeProp = attributes[0].GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public).Where(x => x.PropertyType == typeof(bool)).First();
-                var write = (bool)writeProp.GetValue(attributes[0]);
+                var write = (bool)writeProp.GetValue(attributes[0])!;
                 return write;
             }
             
-            if (pi.CanWrite && pi.GetSetMethod(true).IsPublic)
+            if (pi.CanWrite && pi.GetSetMethod(true)?.IsPublic == true)
             {
                 return true;
                 // The setter exists and is public.
