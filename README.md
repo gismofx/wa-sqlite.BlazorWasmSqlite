@@ -1,5 +1,12 @@
 # wa-sqlite.BlazorWasmSqlite
 
+[![NuGet](https://img.shields.io/nuget/v/wa-sqlite.BlazorWasmSqlite?style=flat-square&color=004880&label=NuGet)](https://www.nuget.org/packages/wa-sqlite.BlazorWasmSqlite)
+[![NuGet Downloads](https://img.shields.io/nuget/dt/wa-sqlite.BlazorWasmSqlite?style=flat-square&color=004880)](https://www.nuget.org/packages/wa-sqlite.BlazorWasmSqlite)
+[![Publish](https://img.shields.io/github/actions/workflow/status/gismofx/wa-sqlite.BlazorWasmSqlite/publish.yml?style=flat-square&label=publish)](https://github.com/gismofx/wa-sqlite.BlazorWasmSqlite/actions/workflows/publish.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE.txt)
+[![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4?style=flat-square)](https://dotnet.microsoft.com/en-us/download/dotnet/8.0)
+[![Tests](https://img.shields.io/github/actions/workflow/status/gismofx/wa-sqlite.BlazorWasmSqlite/test.yml?style=flat-square&label=tests)](https://github.com/gismofx/wa-sqlite.BlazorWasmSqlite/actions/workflows/test.yml)
+
 A Blazor WebAssembly Razor Class Library that provides a SQLite database backed by IndexedDB, running off the main thread in a Web Worker. Built on [`@journeyapps/wa-sqlite`](https://github.com/powersync-ja/wa-sqlite) with Dapper support.
 
 ---
