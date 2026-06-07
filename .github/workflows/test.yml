@@ -1,0 +1,38 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:     # Also triggerable manually from Actions tab
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - name: Restore
+        run: dotnet restore wa-sqlite.BlazorWasmSqlite.Tests/wa-sqlite.BlazorWasmSqlite.Tests.csproj
+
+      - name: Build
+        run: >
+          dotnet build wa-sqlite.BlazorWasmSqlite.Tests/wa-sqlite.BlazorWasmSqlite.Tests.csproj
+          -p:SkipNpmBuild=true
+          --no-restore
+
+      - name: Test
+        run: >
+          dotnet test wa-sqlite.BlazorWasmSqlite.Tests/wa-sqlite.BlazorWasmSqlite.Tests.csproj
+          -p:SkipNpmBuild=true
+          --no-build
+          --logger "console;verbosity=minimal"
