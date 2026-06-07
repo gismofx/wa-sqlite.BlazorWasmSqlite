@@ -1,5 +1,7 @@
 # wa-sqlite.BlazorWasmSqlite
 
+<img src="wa-sqlite.BlazorWasmSqliteIcon.png" alt="wa-sqlite.BlazorWasmSqlite logo" width="96" height="96" align="left" style="margin-right:16px; margin-bottom:8px"/>
+
 [![NuGet](https://img.shields.io/nuget/v/wa-sqlite.BlazorWasmSqlite?style=flat-square&color=004880&label=NuGet)](https://www.nuget.org/packages/wa-sqlite.BlazorWasmSqlite)
 [![NuGet Downloads](https://img.shields.io/nuget/dt/wa-sqlite.BlazorWasmSqlite?style=flat-square&color=004880)](https://www.nuget.org/packages/wa-sqlite.BlazorWasmSqlite)
 [![Publish](https://img.shields.io/github/actions/workflow/status/gismofx/wa-sqlite.BlazorWasmSqlite/publish.yml?style=flat-square&label=publish)](https://github.com/gismofx/wa-sqlite.BlazorWasmSqlite/actions/workflows/publish.yml)

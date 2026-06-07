@@ -18,6 +18,7 @@
     <PackageTags>blazor;wasm;sqlite;indexeddb;wa-sqlite;dapper;offline;webassembly;browser</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+    <PackageIcon>wa-sqlite.BlazorWasmSqliteIcon.png</PackageIcon>
     <PackageProjectUrl>https://github.com/gismofx/wa-sqlite.BlazorWasmSqlite</PackageProjectUrl>
     <RepositoryUrl>https://github.com/gismofx/wa-sqlite.BlazorWasmSqlite</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
@@ -32,6 +33,7 @@
   <ItemGroup>
     <None Include="..\README.md" Pack="true" PackagePath="\" />
     <None Include="..\LICENSE.txt" Pack="true" PackagePath="\" />
+    <None Include="..\wa-sqlite.BlazorWasmSqliteIcon.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>
