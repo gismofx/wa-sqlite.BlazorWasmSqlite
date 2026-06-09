@@ -55,7 +55,18 @@ builder.Services.AddSqliteWasmInterop();
 
 This registers Dapper type handlers for `bool`, `DateTime`, and `Guid` SQLite mappings.
 
-### 2. Initialize the JS module
+### 2. Add the script to `index.html`
+
+In `wwwroot/index.html`, add after `blazor.webassembly.js`:
+
+```html
+<script src="_framework/blazor.webassembly.js"></script>
+<script src="_content/wa-sqlite.BlazorWasmSqlite/sqlite.min.js"></script>
+```
+
+This loads the main thread bridge and Web Worker bundle that backs `SqliteJsInterop`.
+
+### 3. Initialize the JS module
 
 Call once at app startup (e.g. `Program.cs` after `builder.Build()`):
 
