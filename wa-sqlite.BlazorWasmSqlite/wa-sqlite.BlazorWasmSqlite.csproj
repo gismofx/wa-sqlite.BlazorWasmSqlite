@@ -11,7 +11,7 @@
 
   <PropertyGroup>
     <PackageId>wa-sqlite.BlazorWasmSqlite</PackageId>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Authors>gismofx</Authors>
     <Copyright>Copyright © 2026 gismofx</Copyright>
     <Description>Blazor WebAssembly SQLite library backed by IndexedDB, running off the main thread in a Web Worker. Built on @journeyapps/wa-sqlite with Dapper support. Includes automatic JSPI/Asyncify detection for optimal browser compatibility.</Description>
@@ -54,7 +54,13 @@
 	</PropertyGroup>
 
 	<Target Name="InstallAndRunNpm" BeforeTargets="PreBuildEvent" Condition="'$(SkipNpmBuild)' != 'true'">
-		<Exec Command="npm install" WorkingDirectory="NpmJS" />
+		<!-- The include=dev flag below is load-bearing: webpack, webpack-cli and terser are all
+		     devDependencies, and a machine with NODE_ENV=production (or npm config omit=dev)
+		     silently skips them. npm then reports "up to date" against a tree with no
+		     node_modules/.bin, and the next line fails with "'webpack' is not recognized" —
+		     which reads as a broken repo and invites SkipNpmBuild=true, which packs whatever
+		     stale bundles happen to be committed. -->
+		<Exec Command="npm install --include=dev" WorkingDirectory="NpmJS" />
 		<Exec Command="npm run-script $(NpmScript)" WorkingDirectory="NpmJS" />
 	</Target>
 	
