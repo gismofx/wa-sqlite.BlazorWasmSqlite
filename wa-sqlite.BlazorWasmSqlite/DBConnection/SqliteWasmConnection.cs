@@ -30,14 +30,29 @@ public sealed class SqliteWasmConnection : DbConnection
     internal readonly SemaphoreSlim WorkerLock = new SemaphoreSlim(1, 1);
 
     /// <summary>
+    /// The only route from this library into the Worker. See
+    /// <see cref="Worker.ISqliteWorkerBridge"/> for why it exists and why it holds no lock.
+    /// </summary>
+    internal readonly Worker.ISqliteWorkerBridge Bridge;
+
+    /// <summary>
     /// Initialises a connection to the SQLite database stored in IndexedDB.
     /// </summary>
     /// <param name="dbName">Logical database name passed to <c>sqlite3_open_v2</c>.</param>
     /// <param name="fileName">IndexedDB VFS file name — used as the IDB database key.</param>
     public SqliteWasmConnection(string dbName, string fileName)
+        : this(dbName, fileName, new Worker.JsInteropWorkerBridge()) { }
+
+    /// <summary>
+    /// Test seam: the same connection over a substituted worker. Internal, and visible to the
+    /// test assembly only — a fake bridge is what makes the concurrency behaviour assertable
+    /// outside a browser.
+    /// </summary>
+    internal SqliteWasmConnection(string dbName, string fileName, Worker.ISqliteWorkerBridge bridge)
     {
         _dbName = dbName;
         _fileName = fileName;
+        Bridge = bridge;
     }
 
     /// <summary>
@@ -73,7 +88,7 @@ public sealed class SqliteWasmConnection : DbConnection
     {
         if (_state == ConnectionState.Open) return;
         _state = ConnectionState.Connecting;
-        ConnectionHandle = await SqliteJsInterop.OpenAsync(_dbName, _fileName);
+        ConnectionHandle = await Bridge.OpenAsync(_dbName, _fileName);
         _state = ConnectionState.Open;
 
         // Set foundational connection pragmas. These are safe to set unconditionally:
@@ -83,15 +98,15 @@ public sealed class SqliteWasmConnection : DbConnection
         // - temp_store: keeps SQLite's internal temp B-trees and sort spills in memory rather
         //   than routing them through the async IDBBatchAtomicVFS. Standard best practice for
         //   all WASM SQLite deployments — temp data is ephemeral and has no durability requirement.
-        await SqliteJsInterop.ExecuteAsync(ConnectionHandle, "PRAGMA page_size=8192", null);
-        await SqliteJsInterop.ExecuteAsync(ConnectionHandle, "PRAGMA temp_store=MEMORY", null);
+        await Bridge.ExecuteAsync(ConnectionHandle, "PRAGMA page_size=8192", null);
+        await Bridge.ExecuteAsync(ConnectionHandle, "PRAGMA temp_store=MEMORY", null);
     }
 
     /// <summary>Closes the database and releases the IndexedDB VFS lock.</summary>
     public override async Task CloseAsync()
     {
         if (_state == ConnectionState.Closed) return;
-        await SqliteJsInterop.CloseAsync();
+        await Bridge.CloseAsync();
         _state = ConnectionState.Closed;
         ConnectionHandle = 0;
     }

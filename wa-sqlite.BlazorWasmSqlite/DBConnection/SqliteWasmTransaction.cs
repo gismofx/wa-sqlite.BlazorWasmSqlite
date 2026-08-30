@@ -27,7 +27,7 @@ public sealed class SqliteWasmTransaction : DbTransaction
 
     internal async Task BeginAsync()
     {
-        await SqliteJsInterop.ExecuteAsync(
+        await _connection.Bridge.ExecuteAsync(
             _connection.ConnectionHandle, "BEGIN TRANSACTION", null);
     }
 
@@ -41,11 +41,10 @@ public sealed class SqliteWasmTransaction : DbTransaction
     public async Task CommitAsync()
     {
         if (_completed) return;
-        var result = await SqliteJsInterop.ExecuteAsync(
+        var result = await _connection.Bridge.ExecuteAsync(
             _connection.ConnectionHandle, "COMMIT", null);
-        var error = result.GetPropertyAsString("error");
-        if (!string.IsNullOrEmpty(error))
-            throw new InvalidOperationException($"SQLite COMMIT failed: {error}");
+        if (!string.IsNullOrEmpty(result.Error))
+            throw new InvalidOperationException($"SQLite COMMIT failed: {result.Error}");
         _completed = true;
     }
 
@@ -53,7 +52,7 @@ public sealed class SqliteWasmTransaction : DbTransaction
     public async Task RollbackAsync()
     {
         if (_completed) return;
-        await SqliteJsInterop.ExecuteAsync(
+        await _connection.Bridge.ExecuteAsync(
             _connection.ConnectionHandle, "ROLLBACK", null);
         _completed = true;
     }

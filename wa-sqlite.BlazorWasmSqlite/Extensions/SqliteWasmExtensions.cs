@@ -152,19 +152,14 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             {
                 var payload = SqliteWorkerPayloadBuilder.BuildUpsertPayload(
                     tableName, records, primaryKey, rowsPerStatement);
-                using var result = await SqliteJsInterop.BulkInsertRawUpsertAsync(
+                var result = await connection.Bridge.BulkInsertRawUpsertAsync(
                     connection.ConnectionHandle, payload);
 
-                if (result != null)
-                {
-                    var firstError = result.GetPropertyAsString("firstError");
-                    if (firstError != null)
-                        throw new InvalidOperationException(
-                            $"SQLite error in table '{tableName}': {firstError}");
+                if (result.FirstError != null)
+                    throw new InvalidOperationException(
+                        $"SQLite error in table '{tableName}': {result.FirstError}");
 
-                    return (int)result.GetPropertyAsDouble("totalChanges");
-                }
-                return 0;
+                return (int)result.TotalChanges;
             }
             catch (Exception ex)
             {

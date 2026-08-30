@@ -209,11 +209,10 @@ public sealed class SqliteWasmCommand : DbCommand
         try
         {
             var connHandle = _connection!.ConnectionHandle;
-            var result = await SqliteJsInterop.ExecuteAsync(connHandle, CommandText, SerializeParameters());
-            var error = result.GetPropertyAsString("error");
-            if (!string.IsNullOrEmpty(error))
-                throw new Exception($"SQLite execute error: {error} | SQL: {CommandText.Trim()}");
-            return result.GetPropertyAsInt32("changes");
+            var result = await _connection!.Bridge.ExecuteAsync(connHandle, CommandText, SerializeParameters());
+            if (!string.IsNullOrEmpty(result.Error))
+                throw new Exception($"SQLite execute error: {result.Error} | SQL: {CommandText.Trim()}");
+            return result.Changes;
         }
         finally
         {
@@ -229,7 +228,7 @@ public sealed class SqliteWasmCommand : DbCommand
         try
         {
             var connHandle = _connection!.ConnectionHandle;
-            var json = await SqliteJsInterop.QueryJsonAsync(connHandle, CommandText, SerializeParameters());
+            var json = await _connection!.Bridge.QueryJsonAsync(connHandle, CommandText, SerializeParameters());
             try
             {
                 using var reader = SqliteWasmDbDataReader.FromJson(json);
@@ -257,7 +256,7 @@ public sealed class SqliteWasmCommand : DbCommand
         try
         {
             var connHandle = _connection!.ConnectionHandle;
-            var json = await SqliteJsInterop.QueryJsonAsync(connHandle, CommandText, SerializeParameters());
+            var json = await _connection!.Bridge.QueryJsonAsync(connHandle, CommandText, SerializeParameters());
             try
             {
                 return SqliteWasmDbDataReader.FromJson(json);
