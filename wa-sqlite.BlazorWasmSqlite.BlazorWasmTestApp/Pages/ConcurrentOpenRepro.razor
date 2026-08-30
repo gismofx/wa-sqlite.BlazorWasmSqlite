@@ -1,0 +1,109 @@
+@page "/repro/concurrent-open"
+
+@using wa_sqlite.BlazorWasmSqlite.DBConnection
+@using Dapper
+
+@*
+    Reproduction for the "Cannot read properties of undefined (reading 'xDeviceCharacteristics')"
+    defect. Runs itself on first render so an automated browser only has to navigate here.
+
+    The shape it replays is the one that broke a consuming app: the connection is opened once,
+    used, CLOSED, and then several callers each issue a query against the now-closed connection.
+    Dapper's contract opens a closed connection per call, so those callers race each other into
+    SqliteWasmConnection.OpenAsync, which is not re-entrant. Each one reaches the worker's open
+    handler, whose "have I registered a VFS for this file?" check straddles an await, so more
+    than one VFS is created and registered under the same name. The second registration evicts
+    the first from the module's callback map while it is still in use, and the next VFS method
+    dispatched on it reads a property off undefined.
+
+    Markers are written to the console so a test can assert on them:
+      [REPRO] START / [REPRO] PASS / [REPRO] FAIL: <detail>
+*@
+
+<PageTitle>Concurrent open reproduction</PageTitle>
+
+<MudContainer Class="mt-4">
+    <MudText Typo="Typo.h5">Concurrent re-open reproduction</MudText>
+    <MudText Class="mt-2">Status: <b id="repro-status">@Status</b></MudText>
+    <MudText Class="mt-2"><pre id="repro-detail">@Detail</pre></MudText>
+    <MudButton Class="mt-4" Variant="Variant.Filled" OnClick="@(async () => await RunAsync())">Run again</MudButton>
+</MudContainer>
+
+@code {
+    // Its own database, so a run here cannot disturb the other test pages.
+    private const string DbName = "ReproApp";
+    private const string FileName = "ReproFile";
+
+    // How many callers pile into the closed connection at once. Two is enough in principle;
+    // four makes the interleaving reliable without making the failure hard to read.
+    private const int ConcurrentReaders = 4;
+
+    private string Status = "not started";
+    private string Detail = string.Empty;
+    private bool _ran;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _ran) return;
+        _ran = true;
+        await RunAsync();
+    }
+
+    private async Task RunAsync()
+    {
+        Status = "running";
+        Detail = string.Empty;
+        StateHasChanged();
+        Console.WriteLine("[REPRO] START");
+
+        try
+        {
+            var conn = new SqliteWasmConnection(DbName, FileName);
+
+            // 1. Open and do real work, so the file has pages and the VFS is genuinely in use.
+            await conn.OpenAsync();
+            await conn.ExecuteAsync(
+                "CREATE TABLE IF NOT EXISTS repro (Id INTEGER PRIMARY KEY, Name TEXT)");
+            await conn.ExecuteAsync(
+                "INSERT OR REPLACE INTO repro (Id, Name) VALUES (1,'a'),(2,'b'),(3,'c')");
+
+            // 2. Close it. This is the step a consumer performs in a `finally` without
+            //    realising the connection is process-wide; it also clears the worker's
+            //    record of the registered VFS while SQLite keeps its own.
+            await conn.CloseAsync();
+
+            // 3. Several callers query the closed connection at once. Dapper opens a closed
+            //    connection per call, so this is N concurrent OpenAsync calls by construction.
+            var readers = Enumerable.Range(0, ConcurrentReaders)
+                .Select(_ => conn.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM repro"))
+                .ToArray();
+
+            var counts = await Task.WhenAll(readers);
+
+            if (counts.Any(c => c != 3))
+            {
+                Fail($"expected every reader to see 3 rows, got [{string.Join(",", counts)}]");
+                return;
+            }
+
+            Status = "PASS";
+            Detail = $"{ConcurrentReaders} concurrent readers all returned 3 rows.";
+            Console.WriteLine("[REPRO] PASS");
+        }
+        catch (Exception ex)
+        {
+            Fail($"{ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
+
+    private void Fail(string message)
+    {
+        Status = "FAIL";
+        Detail = message;
+        Console.WriteLine($"[REPRO] FAIL: {message}");
+    }
+}
