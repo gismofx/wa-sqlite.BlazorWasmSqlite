@@ -29,12 +29,6 @@ public sealed class SqliteWasmConnection : DbConnection
     /// </summary>
     internal readonly Worker.SqliteWorkerSession Session;
 
-    /// <summary>
-    /// Every application in a browser tab talks to the same worker and the same database, so
-    /// connections created independently must still find the same session.
-    /// </summary>
-    private static Worker.SqliteWorkerSession? s_default;
-
     /// <summary>The only route from this library into the Worker.</summary>
     internal Worker.ISqliteWorkerBridge Bridge => Session.Bridge;
 
@@ -54,17 +48,22 @@ public sealed class SqliteWasmConnection : DbConnection
     /// <param name="dbName">Logical database name passed to <c>sqlite3_open_v2</c>.</param>
     /// <param name="fileName">IndexedDB VFS file name — used as the IDB database key.</param>
     public SqliteWasmConnection(string dbName, string fileName)
-        : this(dbName, fileName,
-               s_default ??= new Worker.SqliteWorkerSession(new Worker.JsInteropWorkerBridge()))
-    { }
+        : this(dbName, fileName, Worker.SqliteWorkerSessionRegistry.Default) { }
 
     /// <summary>
-    /// Test seam: the same connection over a substituted worker, in a session of its own so
+    /// Test seam: the same connection over a substituted worker, in a registry of its own so
     /// tests do not share state. Internal, and visible to the test assembly only — a fake bridge
     /// is what makes the concurrency behaviour assertable outside a browser.
     /// </summary>
     internal SqliteWasmConnection(string dbName, string fileName, Worker.ISqliteWorkerBridge bridge)
-        : this(dbName, fileName, new Worker.SqliteWorkerSession(bridge)) { }
+        : this(dbName, fileName, new Worker.SqliteWorkerSessionRegistry(() => bridge)) { }
+
+    /// <summary>
+    /// Test seam for behaviour that only appears when connections SHARE a registry — which is
+    /// what the public constructor does. A per-connection session hides it entirely.
+    /// </summary>
+    internal SqliteWasmConnection(string dbName, string fileName, Worker.SqliteWorkerSessionRegistry registry)
+        : this(dbName, fileName, registry.Get(dbName, fileName)) { }
 
     private SqliteWasmConnection(string dbName, string fileName, Worker.SqliteWorkerSession session)
     {
