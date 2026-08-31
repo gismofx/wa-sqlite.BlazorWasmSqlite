@@ -82,15 +82,30 @@ internal sealed class SqliteWorkerSession
     public TimeSpan LeaseTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>Take exclusive use of the database.</summary>
-    public async Task AcquireLeaseAsync(CancellationToken ct)
+    public Task AcquireLeaseAsync(CancellationToken ct) => AcquireLeaseAsync(ct, forDelete: false);
+
+    /// <summary>
+    /// Take the lease for a delete, which stays legal after the database is already gone.
+    /// </summary>
+    /// <remarks>
+    /// Deleting is the one operation that must survive <see cref="MarkDeleted"/>. An application
+    /// tearing down more than one file deletes them in sequence — DVMApp removes both the legacy
+    /// and the current database — and the first delete must not brick the second.
+    /// </remarks>
+    public Task AcquireLeaseForDeleteAsync(CancellationToken ct) => AcquireLeaseAsync(ct, forDelete: true);
+
+    private async Task AcquireLeaseAsync(CancellationToken ct, bool forDelete)
     {
-        ThrowIfDeleted();
+        if (!forDelete) ThrowIfDeleted();
         if (await _lease.WaitAsync(LeaseTimeout, ct).ConfigureAwait(false))
         {
             // Checked again on the way out: the delete may have completed while this caller was
             // queued behind it, which is exactly when a silent empty database would be created.
-            try { ThrowIfDeleted(); }
-            catch { _lease.Release(); throw; }
+            if (!forDelete)
+            {
+                try { ThrowIfDeleted(); }
+                catch { _lease.Release(); throw; }
+            }
             return;
         }
 
@@ -123,9 +138,15 @@ internal sealed class SqliteWorkerSession
     }
 
     /// <summary>Run one worker round-trip, with nothing else in flight.</summary>
-    public async Task<T> RunExclusiveAsync<T>(Func<Task<T>> operation, CancellationToken ct)
+    public Task<T> RunExclusiveAsync<T>(Func<Task<T>> operation, CancellationToken ct)
     {
         ThrowIfDeleted();
+        return RunForDeleteAsync(operation, ct);
+    }
+
+    /// <summary>As <see cref="RunExclusiveAsync"/>, but permitted after the database is gone.</summary>
+    public async Task<T> RunForDeleteAsync<T>(Func<Task<T>> operation, CancellationToken ct)
+    {
         await _io.WaitAsync(ct).ConfigureAwait(false);
         try { return await operation().ConfigureAwait(false); }
         finally { _io.Release(); }

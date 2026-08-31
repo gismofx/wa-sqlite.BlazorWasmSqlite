@@ -241,13 +241,15 @@ public sealed class SqliteWasmConnection : DbConnection
     public async Task DeleteDatabaseAsync(string fileName, CancellationToken ct = default)
     {
         var tookLease = !_holdsLease;
-        if (tookLease) await Session.AcquireLeaseAsync(ct);
+        // Deliberately the delete-flavoured acquisition: an application removing more than one
+        // database deletes them in sequence, and the first must not brick the second.
+        if (tookLease) await Session.AcquireLeaseForDeleteAsync(ct);
         try
         {
             // Both locks, and both are needed. The lease keeps other connections out; the I/O
             // lock keeps THIS connection's own in-flight work out, which the lease cannot do
             // because the caller deleting the database is usually already holding it.
-            await Session.RunExclusiveAsync(() => Bridge.DeleteDatabaseAsync(fileName), ct);
+            await Session.RunForDeleteAsync(() => Bridge.DeleteDatabaseAsync(fileName), ct);
             Session.MarkDeleted();
             _state = ConnectionState.Closed;
             ConnectionHandle = 0;

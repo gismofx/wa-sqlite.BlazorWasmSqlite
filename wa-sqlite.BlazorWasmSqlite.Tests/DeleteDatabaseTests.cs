@@ -55,6 +55,23 @@ public class DeleteDatabaseTests
     }
 
     [Fact]
+    public async Task A_second_delete_still_works_after_the_first()
+    {
+        var bridge = new FakeWorkerBridge();
+        var connection = Connect(bridge);
+        await connection.OpenAsync();
+
+        // The real pattern: an application tearing down its storage removes more than one file
+        // in sequence. DVMApp deletes the legacy database and the current one. Marking the
+        // session deleted on the first call must not make the second throw - which it did until
+        // Chad asked whether anything clears the flag.
+        await connection.DeleteDatabaseAsync("LegacyFile");
+        await connection.DeleteDatabaseAsync("TestFile");
+
+        bridge.Calls.Count(c => c == "delete").Should().Be(2);
+    }
+
+    [Fact]
     public async Task Delete_releases_the_lease_so_it_cannot_wedge_the_page()
     {
         var bridge = new FakeWorkerBridge();
