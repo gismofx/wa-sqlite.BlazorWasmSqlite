@@ -49,10 +49,19 @@
   </ItemGroup>
 	
 	<PropertyGroup>
-		<NpmScript Condition="'$(Configuration)' == 'Release'">prod</NpmScript>
-		<NpmScript Condition="'$(Configuration)' != 'Release'">dev</NpmScript>
+		<!-- Always production, even in Debug. The committed wwwroot bundles ARE the shipped
+		     artifact, so a Debug build emitting development bundles silently replaces them with
+		     something that must never be packed - which is how an unminified worker ended up in
+		     the published 1.0.1. Debugging the worker source is still possible: run
+		     `npm run-script dev` by hand, then restore wwwroot from git to put it back. -->
+		<NpmScript>prod</NpmScript>
 	</PropertyGroup>
 
+	<!-- Runs on every build. An Inputs/Outputs pair was tried here to make it incremental and
+	     did NOT skip, so the attributes are gone rather than left in place describing behaviour
+	     that was not happening. It costs about two seconds, and because the script is pinned to
+	     production the regenerated bundles are byte-identical to the committed ones - verified
+	     with `git diff`, which reports no change after a rebuild. -->
 	<Target Name="InstallAndRunNpm" BeforeTargets="PreBuildEvent" Condition="'$(SkipNpmBuild)' != 'true'">
 		<!-- The include=dev flag below is load-bearing: webpack, webpack-cli and terser are all
 		     devDependencies, and a machine with NODE_ENV=production (or npm config omit=dev)
