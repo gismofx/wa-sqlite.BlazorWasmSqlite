@@ -1,7 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <!-- Multi-target rather than move. Consumers still on net8.0 - DVM.Core is one - resolve the
+         net8.0 asset unchanged, while a net10.0 consumer gets a framework-native one. Dropping
+         net8.0 would break them the moment this ships. -->
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -37,8 +40,22 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Dapper 2.0.4 targets netstandard2.0, so it resolves and runs on net10 unchanged. It is
+         from 2020 and this library's whole design leans on Dapper's open-if-closed/close-after
+         contract, which is an argument for bumping it - but on its own, with the suite as the
+         gate, not bundled with a target-framework change. The tests already run 2.1.72 against
+         it, which is its own smell and the place to start. -->
     <PackageReference Include="Dapper" Version="2.0.4" />
+  </ItemGroup>
+
+  <!-- Framework-matched, so each target gets the Blazor components built for it rather than
+       resolving an older asset by compatibility. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="8.0.11" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.11" />
   </ItemGroup>
 
   <ItemGroup>

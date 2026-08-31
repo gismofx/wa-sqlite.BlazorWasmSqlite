@@ -237,6 +237,7 @@ public sealed class SqliteWasmConnection : DbConnection
     /// </para>
     /// </remarks>
     /// <param name="fileName">IndexedDB database name, as passed to the constructor.</param>
+    /// <param name="ct">Cancels waiting for the lease, not the delete itself.</param>
     public async Task DeleteDatabaseAsync(string fileName, CancellationToken ct = default)
     {
         var tookLease = !_holdsLease;
