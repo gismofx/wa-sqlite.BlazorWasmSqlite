@@ -35,6 +35,25 @@ public class MultipleDatabaseTests
     }
 
     [Fact]
+    public async Task Names_differing_only_in_case_are_different_databases()
+    {
+        var bridge = new FakeWorkerBridge();
+        var registry = new SqliteWorkerSessionRegistry(() => bridge);
+
+        var lower = new SqliteWasmConnection("app", "file", registry);
+        var upper = new SqliteWasmConnection("App", "File", registry);
+
+        await lower.OpenAsync();
+        await upper.OpenAsync();
+
+        // IndexedDB compares database names as strings, so "file" and "File" really are two
+        // databases. A case-insensitive key would hand both connections one session, one lease
+        // and one open handle — the defect 28bb78d fixed, in a subtler form.
+        bridge.OpenCount.Should().Be(2);
+        lower.ConnectionHandle.Should().NotBe(upper.ConnectionHandle);
+    }
+
+    [Fact]
     public async Task One_database_being_open_does_not_block_another()
     {
         var bridge = new FakeWorkerBridge();

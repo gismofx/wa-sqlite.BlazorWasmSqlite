@@ -23,7 +23,14 @@ namespace wa_sqlite.BlazorWasmSqlite.Worker;
 internal sealed class SqliteWorkerSessionRegistry
 {
     private readonly Func<ISqliteWorkerBridge> _bridgeFactory;
-    private readonly ConcurrentDictionary<string, SqliteWorkerSession> _sessions = new();
+    // Ordinal, declared rather than inherited from the default comparer. Both names are
+    // case-sensitive in the platforms underneath: IndexedDB compares database names as strings,
+    // so "MyFile" and "myfile" are two different databases, and dbName is a path inside the VFS
+    // with the same property. A case-INSENSITIVE key would map two genuinely different databases
+    // onto one session, one lease and one open handle - the exact defect this class fixed, in a
+    // more subtle form. Do not "helpfully" change this to OrdinalIgnoreCase.
+    private readonly ConcurrentDictionary<string, SqliteWorkerSession> _sessions =
+        new(StringComparer.Ordinal);
 
     public SqliteWorkerSessionRegistry(Func<ISqliteWorkerBridge> bridgeFactory) =>
         _bridgeFactory = bridgeFactory;
