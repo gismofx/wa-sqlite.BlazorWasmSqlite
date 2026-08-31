@@ -45,6 +45,31 @@ internal sealed class SqliteWorkerSession
     private readonly SemaphoreSlim _lease = new(1, 1);
     private readonly SemaphoreSlim _io = new(1, 1);
     private Task<int>? _openTask;
+    private bool _deleted;
+
+    private const string DeletedMessage =
+        "The database has been deleted. Reload the page before using it again — reopening now " +
+        "would silently create a new empty one, because SQLite opens with SQLITE_OPEN_CREATE.";
+
+    /// <summary>
+    /// Marks the database gone, so later use fails loudly.
+    /// </summary>
+    /// <remarks>
+    /// Without this the failure is silent and much worse than an exception: the worker opens
+    /// with <c>SQLITE_OPEN_CREATE</c>, so a query after a delete does not error - it creates a
+    /// fresh empty database and returns no rows. For an offline-first application that is a
+    /// data-loss shape wearing the costume of a successful query.
+    /// </remarks>
+    public void MarkDeleted()
+    {
+        _deleted = true;
+        _openTask = null;
+    }
+
+    private void ThrowIfDeleted()
+    {
+        if (_deleted) throw new InvalidOperationException(DeletedMessage);
+    }
 
     public SqliteWorkerSession(ISqliteWorkerBridge bridge) => Bridge = bridge;
 
@@ -59,7 +84,15 @@ internal sealed class SqliteWorkerSession
     /// <summary>Take exclusive use of the database.</summary>
     public async Task AcquireLeaseAsync(CancellationToken ct)
     {
-        if (await _lease.WaitAsync(LeaseTimeout, ct).ConfigureAwait(false)) return;
+        ThrowIfDeleted();
+        if (await _lease.WaitAsync(LeaseTimeout, ct).ConfigureAwait(false))
+        {
+            // Checked again on the way out: the delete may have completed while this caller was
+            // queued behind it, which is exactly when a silent empty database would be created.
+            try { ThrowIfDeleted(); }
+            catch { _lease.Release(); throw; }
+            return;
+        }
 
         throw new TimeoutException(
             $"Timed out after {LeaseTimeout.TotalSeconds:0}s waiting for the SQLite connection. " +
@@ -92,6 +125,7 @@ internal sealed class SqliteWorkerSession
     /// <summary>Run one worker round-trip, with nothing else in flight.</summary>
     public async Task<T> RunExclusiveAsync<T>(Func<Task<T>> operation, CancellationToken ct)
     {
+        ThrowIfDeleted();
         await _io.WaitAsync(ct).ConfigureAwait(false);
         try { return await operation().ConfigureAwait(false); }
         finally { _io.Release(); }

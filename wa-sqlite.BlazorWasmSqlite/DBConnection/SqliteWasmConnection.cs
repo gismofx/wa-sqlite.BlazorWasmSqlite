@@ -216,4 +216,48 @@ public sealed class SqliteWasmConnection : DbConnection
     /// <inheritdoc/>
     public override void ChangeDatabase(string databaseName) =>
         throw new NotSupportedException();
+
+    /// <summary>
+    /// Deletes the IndexedDB database, closing it first. The only operation in this library that
+    /// closes the database rather than merely releasing the lease.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Runs under the lease, so it waits for whatever is in flight and nothing can start while
+    /// it runs. Closing and deleting travel on different channels — the close goes through the
+    /// worker, the delete is a main-thread IndexedDB call — and the window between them is
+    /// precisely where another caller could reopen the file, so both happen inside one
+    /// acquisition.
+    /// </para>
+    /// <para>
+    /// Afterwards this session is marked deleted and every later use throws. That is not
+    /// defensiveness: the worker opens with <c>SQLITE_OPEN_CREATE</c>, so a query after a delete
+    /// would otherwise succeed against a brand-new empty database and return no rows. Reload the
+    /// page — which is what a wipe does anyway.
+    /// </para>
+    /// </remarks>
+    /// <param name="fileName">IndexedDB database name, as passed to the constructor.</param>
+    public async Task DeleteDatabaseAsync(string fileName, CancellationToken ct = default)
+    {
+        var tookLease = !_holdsLease;
+        if (tookLease) await Session.AcquireLeaseAsync(ct);
+        try
+        {
+            // Both locks, and both are needed. The lease keeps other connections out; the I/O
+            // lock keeps THIS connection's own in-flight work out, which the lease cannot do
+            // because the caller deleting the database is usually already holding it.
+            await Session.RunExclusiveAsync(() => Bridge.DeleteDatabaseAsync(fileName), ct);
+            Session.MarkDeleted();
+            _state = ConnectionState.Closed;
+            ConnectionHandle = 0;
+        }
+        finally
+        {
+            if (tookLease || _holdsLease)
+            {
+                _holdsLease = false;
+                Session.ReleaseLease();
+            }
+        }
+    }
 }

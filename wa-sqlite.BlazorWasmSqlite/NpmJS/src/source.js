@@ -136,14 +136,25 @@ window.sqlite = {
     },
 
     /**
-     * Delete an IndexedDB database by name.
-     * Does NOT go through the Worker — this is a browser-level operation.
-     * Useful for dev tooling to force a clean reseed without opening DevTools.
-     * The caller is responsible for closing any open connection first.
+     * Close the database, release the file, then delete it.
+     *
+     * The delete itself is a main-thread IndexedDB call and does not go through the Worker, but
+     * the close and the VFS release do — so this is the one place both channels meet, and the
+     * only place that can order them correctly. It used to be documented as the caller's job
+     * ("close any open connection first, or the delete will be blocked"), which is a contract
+     * every caller can get wrong; folding it in makes it impossible to get wrong.
+     *
+     * After this the file is gone but SQLite still holds a VFS registered under its name whose
+     * JS side has been torn down, so the file must not be reopened without a reload. Callers get
+     * that for free: deleting a database is always followed by one.
+     *
      * @param {string} fileName - IDB database name (matches the fileName passed to open())
      * @returns {Promise<boolean>} resolves true on success
      */
-    deleteDatabase: function (fileName) {
+    deleteDatabase: async function (fileName) {
+        await ensureWorker();
+        await invoke('close');
+        await invoke('releaseFile', fileName);
         return new Promise((resolve, reject) => {
             const req = indexedDB.deleteDatabase(fileName);
             req.onsuccess = () => resolve(true);

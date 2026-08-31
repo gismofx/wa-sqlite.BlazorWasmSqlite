@@ -1,7 +1,7 @@
 {
   "name": "wa-sqlite.blazorwasmsqlite",
-  "version": "1.0.0",
-  "description": "JS Interop Service that wraps wa-sqlite JS WASM package",
+  "version": "0.0.0",
+  "description": "JS Interop Service that wraps wa-sqlite JS WASM package. Private and never published - the npm convention for an unpublished package is 0.0.0, and a real-looking number here invites confusion with the NuGet package version, which is unrelated.",
   "private": true,
   "scripts": {
     "dev": "webpack --mode=development",
