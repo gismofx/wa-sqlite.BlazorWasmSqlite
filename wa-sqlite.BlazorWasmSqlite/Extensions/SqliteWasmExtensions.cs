@@ -152,8 +152,12 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             {
                 var payload = SqliteWorkerPayloadBuilder.BuildUpsertPayload(
                     tableName, records, primaryKey, rowsPerStatement);
-                var result = await connection.Bridge.BulkInsertRawUpsertAsync(
-                    connection.ConnectionHandle, payload);
+                // Through the gate like every other worker round-trip. A bulk insert is the
+                // longest-running call the library makes, so it is the one most likely to have
+                // something else land on top of it.
+                var result = await connection.Session.RunExclusiveAsync(
+                    () => connection.Bridge.BulkInsertRawUpsertAsync(connection.ConnectionHandle, payload),
+                    ct);
 
                 if (result.FirstError != null)
                     throw new InvalidOperationException(

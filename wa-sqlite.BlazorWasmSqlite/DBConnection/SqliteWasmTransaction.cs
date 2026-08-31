@@ -27,8 +27,29 @@ public sealed class SqliteWasmTransaction : DbTransaction
 
     internal async Task BeginAsync()
     {
-        await _connection.Bridge.ExecuteAsync(
-            _connection.ConnectionHandle, "BEGIN TRANSACTION", null);
+        // Hold the I/O lock for the whole transaction. On a single global handle there is no
+        // such thing as another connection's transaction: anything that runs between BEGIN and
+        // COMMIT is inside this one, and a rollback would take that work with it. Statements
+        // issued through this connection reuse the scope rather than re-entering it.
+        await _connection.Session.EnterExclusiveScopeAsync(default);
+        _connection.ActiveTransaction = this;
+        try
+        {
+            await _connection.Bridge.ExecuteAsync(
+                _connection.ConnectionHandle, "BEGIN TRANSACTION", null);
+        }
+        catch
+        {
+            EndScope();
+            throw;
+        }
+    }
+
+    private void EndScope()
+    {
+        if (_connection.ActiveTransaction != this) return;
+        _connection.ActiveTransaction = null;
+        _connection.Session.ExitExclusiveScope();
     }
 
     /// <summary>Not supported — use <see cref="CommitAsync"/>.</summary>
@@ -41,20 +62,36 @@ public sealed class SqliteWasmTransaction : DbTransaction
     public async Task CommitAsync()
     {
         if (_completed) return;
-        var result = await _connection.Bridge.ExecuteAsync(
-            _connection.ConnectionHandle, "COMMIT", null);
-        if (!string.IsNullOrEmpty(result.Error))
-            throw new InvalidOperationException($"SQLite COMMIT failed: {result.Error}");
-        _completed = true;
+        try
+        {
+            var result = await _connection.Bridge.ExecuteAsync(
+                _connection.ConnectionHandle, "COMMIT", null);
+            if (!string.IsNullOrEmpty(result.Error))
+                throw new InvalidOperationException($"SQLite COMMIT failed: {result.Error}");
+        }
+        finally
+        {
+            // Release the scope even when COMMIT fails, or a failed transaction locks the
+            // database against every later caller for the life of the page.
+            _completed = true;
+            EndScope();
+        }
     }
 
     /// <summary>Rolls back the transaction. No-op if already completed.</summary>
     public async Task RollbackAsync()
     {
         if (_completed) return;
-        await _connection.Bridge.ExecuteAsync(
-            _connection.ConnectionHandle, "ROLLBACK", null);
-        _completed = true;
+        try
+        {
+            await _connection.Bridge.ExecuteAsync(
+                _connection.ConnectionHandle, "ROLLBACK", null);
+        }
+        finally
+        {
+            _completed = true;
+            EndScope();
+        }
     }
 
     /// <inheritdoc/>

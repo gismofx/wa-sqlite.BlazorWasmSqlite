@@ -202,75 +202,75 @@ public sealed class SqliteWasmCommand : DbCommand
     // ── Async execution (primary path) ─────────────────────────────────
 
     /// <inheritdoc/>
-    public override async Task<int> ExecuteNonQueryAsync(CancellationToken ct)
-    {
-        var workerLock = _connection!.WorkerLock;
-        await workerLock.WaitAsync(ct);
-        try
+    public override Task<int> ExecuteNonQueryAsync(CancellationToken ct) =>
+        RunAsync(async () =>
         {
-            var connHandle = _connection!.ConnectionHandle;
-            var result = await _connection!.Bridge.ExecuteAsync(connHandle, CommandText, SerializeParameters());
+            var result = await _connection!.Bridge.ExecuteAsync(
+                _connection!.ConnectionHandle, CommandText, SerializeParameters());
             if (!string.IsNullOrEmpty(result.Error))
                 throw new Exception($"SQLite execute error: {result.Error} | SQL: {CommandText.Trim()}");
             return result.Changes;
-        }
-        finally
-        {
-            workerLock.Release();
-        }
-    }
+        }, ct);
+
+    /// <summary>
+    /// Runs one worker round-trip with nothing else in flight.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A statement issued inside a transaction must NOT re-enter the I/O lock: the transaction
+    /// holds it from BEGIN to COMMIT, so re-entering would deadlock the first INSERT against its
+    /// own BEGIN. Reusing the scope is what makes "a transaction excludes other callers" and "a
+    /// transaction can do work" both true at once.
+    /// </para>
+    /// <para>
+    /// Membership is decided by <b>this command's own transaction</b>, not by whether the
+    /// connection happens to have one open. That distinction is the whole point: a connection
+    /// shared across an application has many callers, and a query from an unrelated one must
+    /// queue rather than silently join a transaction it knows nothing about and lose its work to
+    /// that transaction's rollback. It is also the conventional ADO rule - Dapper sets
+    /// <c>Transaction</c> on the command exactly when the caller passes one.
+    /// </para>
+    /// </remarks>
+    private Task<T> RunAsync<T>(Func<Task<T>> operation, CancellationToken ct) =>
+        Transaction is SqliteWasmTransaction
+            ? operation()
+            : _connection!.Session.RunExclusiveAsync(operation, ct);
 
     /// <inheritdoc/>
-    public override async Task<object?> ExecuteScalarAsync(CancellationToken ct)
-    {
-        var workerLock = _connection!.WorkerLock;
-        await workerLock.WaitAsync(ct);
-        try
+    public override Task<object?> ExecuteScalarAsync(CancellationToken ct) =>
+        RunAsync(async () =>
         {
-            var connHandle = _connection!.ConnectionHandle;
-            var json = await _connection!.Bridge.QueryJsonAsync(connHandle, CommandText, SerializeParameters());
+            var json = await _connection!.Bridge.QueryJsonAsync(
+                _connection!.ConnectionHandle, CommandText, SerializeParameters());
             try
             {
                 using var reader = SqliteWasmDbDataReader.FromJson(json);
                 if (reader.Read() && reader.FieldCount > 0)
                     return reader.GetValue(0);
-                return null;
+                return (object?)null;
             }
             catch (Exception ex)
             {
                 throw new Exception($"{ex.Message} | SQL: {CommandText.Trim()}", ex);
             }
-        }
-        finally
-        {
-            workerLock.Release();
-        }
-    }
+        }, ct);
 
     /// <inheritdoc/>
-    protected override async Task<DbDataReader> ExecuteDbDataReaderAsync(
-        CommandBehavior behavior, CancellationToken ct)
-    {
-        var workerLock = _connection!.WorkerLock;
-        await workerLock.WaitAsync(ct);
-        try
+    protected override Task<DbDataReader> ExecuteDbDataReaderAsync(
+        CommandBehavior behavior, CancellationToken ct) =>
+        RunAsync(async () =>
         {
-            var connHandle = _connection!.ConnectionHandle;
-            var json = await _connection!.Bridge.QueryJsonAsync(connHandle, CommandText, SerializeParameters());
+            var json = await _connection!.Bridge.QueryJsonAsync(
+                _connection!.ConnectionHandle, CommandText, SerializeParameters());
             try
             {
-                return SqliteWasmDbDataReader.FromJson(json);
+                return (DbDataReader)SqliteWasmDbDataReader.FromJson(json);
             }
             catch (Exception ex)
             {
                 throw new Exception($"{ex.Message} | SQL: {CommandText.Trim()}", ex);
             }
-        }
-        finally
-        {
-            workerLock.Release();
-        }
-    }
+        }, ct);
 
     // ── Sync methods — not supported in WASM ───────────────────────────
 
