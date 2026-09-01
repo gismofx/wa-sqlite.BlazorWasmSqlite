@@ -1,0 +1,110 @@
+@page "/repro/inflight-reopen"
+
+@using wa_sqlite.BlazorWasmSqlite.DBConnection
+@using Dapper
+
+@*
+    Variant of /repro/concurrent-open. The difference is the only thing that matters:
+    here a read is STILL RUNNING when the connection is closed and re-opened underneath it.
+
+    That ordering is what the consuming app hit. A close clears the worker's record of the
+    registered VFS but does not unregister it from SQLite, so the next open builds a second VFS
+    with the same name; registering it evicts the first from the module's callback map. If
+    nothing is using the first, the damage shows up later as a stale database handle. If a read
+    IS mid-flight on it, the very next VFS method dispatched reads a property off undefined —
+    "Cannot read properties of undefined (reading 'xDeviceCharacteristics')".
+
+    Markers: [REPRO2] START / PASS / FAIL: <detail>
+*@
+
+<PageTitle>In-flight re-open reproduction</PageTitle>
+
+<MudContainer Class="mt-4">
+    <MudText Typo="Typo.h5">Re-open while a read is in flight</MudText>
+    <MudText Class="mt-2">Status: <b id="repro-status">@Status</b></MudText>
+    <MudText Class="mt-2"><pre id="repro-detail">@Detail</pre></MudText>
+    <MudButton Class="mt-4" Variant="Variant.Filled" OnClick="@(async () => await RunAsync())">Run again</MudButton>
+</MudContainer>
+
+@code {
+    private const string DbName = "ReproApp2";
+    private const string FileName = "ReproFile2";
+    private const int Rows = 30_000;
+    private const int ConcurrentReaders = 4;
+
+    // A full scan of a table this size forces a lot of VFS page reads, which is the point:
+    // the read has to still be talking to the VFS when the re-open evicts it.
+    private const string SlowSql = "SELECT COUNT(*) FROM big WHERE Payload LIKE '%ZZZZZZ%'";
+
+    private string Status = "not started";
+    private string Detail = string.Empty;
+    private bool _ran;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _ran) return;
+        _ran = true;
+        await RunAsync();
+    }
+
+    private async Task RunAsync()
+    {
+        Status = "running";
+        Detail = string.Empty;
+        StateHasChanged();
+        Console.WriteLine("[REPRO2] START");
+
+        try
+        {
+            var conn = new SqliteWasmConnection(DbName, FileName);
+            await conn.OpenAsync();
+            await conn.ExecuteAsync("CREATE TABLE IF NOT EXISTS big (Id INTEGER PRIMARY KEY, Payload TEXT)");
+
+            var existing = await conn.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM big");
+            if (existing < Rows)
+            {
+                await conn.ExecuteAsync(
+                    "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x < @rows) " +
+                    "INSERT INTO big (Id, Payload) SELECT x, hex(randomblob(200)) FROM c",
+                    new { rows = Rows });
+            }
+            Console.WriteLine("[REPRO2] seeded");
+
+            // ATTEMPT 1 (kept for the record, and it found a different real defect):
+            // start a slow scan, wait 75ms, then close underneath it. That fails earlier than
+            // the VFS eviction, with "unable to close due to unfinalized statements or
+            // unfinished backups" — SQLite refuses the close outright while a statement is
+            // live, and CloseAsync lets that throw without resetting its own state.
+            //
+            // ATTEMPT 2 (this one): overlap the CLOSE ITSELF with the re-opens rather than a
+            // read. A successful close finalises statements but tears the VFS down
+            // asynchronously; the re-open only rebuilds a VFS because the close already cleared
+            // the worker's record of it. So the window where a live VFS can be evicted is
+            // between "close has cleared the map" and "close has finished tearing down" — which
+            // means the close must NOT be awaited before the re-opens are issued.
+
+            var close = conn.CloseAsync();
+
+            var readers = Enumerable.Range(0, ConcurrentReaders)
+                .Select(_ => conn.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM big"))
+                .ToArray();
+
+            await close;
+            var counts = await Task.WhenAll(readers);
+
+            Status = "PASS";
+            Detail = $"readers returned [{string.Join(",", counts)}]";
+            Console.WriteLine("[REPRO2] PASS");
+        }
+        catch (Exception ex)
+        {
+            Status = "FAIL";
+            Detail = $"{ex.GetType().Name}: {ex.Message}";
+            Console.WriteLine($"[REPRO2] FAIL: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
+}

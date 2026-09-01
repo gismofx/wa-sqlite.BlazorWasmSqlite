@@ -1,4 +1,4 @@
-using Dapper;
+﻿using Dapper;
 using System;
 using System.Data;
 using System.Globalization;
@@ -29,6 +29,7 @@ namespace wa_sqlite.BlazorWasmSqlite;
 /// </summary>
 public static class SqliteWasmDapperTypeHandlers
 {
+    /// <summary>Guards <see cref="Register"/> so repeated calls are a no-op.</summary>
     private static bool _registered;
 
     /// <summary>
@@ -68,6 +69,7 @@ public static class SqliteWasmDapperTypeHandlers
 
     // ── DateTime ─────────────────────────────────────────────────────────────
 
+    /// <summary>Maps SQLite values to <c>DateTime</c>.</summary>
     private sealed class DateTimeHandler : SqlMapper.TypeHandler<DateTime>
     {
         public override DateTime Parse(object value)
@@ -84,6 +86,7 @@ public static class SqliteWasmDapperTypeHandlers
             => parameter.Value = value.ToString("s");
     }
 
+    /// <summary>Maps SQLite values to <c>DateTime?</c>, returning null for NULL. Registered before the non-nullable handler; see the note on Register.</summary>
     private sealed class NullableDateTimeHandler : SqlMapper.TypeHandler<DateTime?>
     {
         public override DateTime? Parse(object value)
@@ -100,6 +103,7 @@ public static class SqliteWasmDapperTypeHandlers
 
     // ── DateTimeOffset ────────────────────────────────────────────────────────
 
+    /// <summary>Maps SQLite values to <c>DateTimeOffset</c>.</summary>
     private sealed class DateTimeOffsetHandler : SqlMapper.TypeHandler<DateTimeOffset>
     {
         public override DateTimeOffset Parse(object value)
@@ -116,6 +120,7 @@ public static class SqliteWasmDapperTypeHandlers
             => parameter.Value = value.ToUniversalTime().ToString("s") + "Z";
     }
 
+    /// <summary>Maps SQLite values to <c>DateTimeOffset?</c>, returning null for NULL. Registered before the non-nullable handler; see the note on Register.</summary>
     private sealed class NullableDateTimeOffsetHandler : SqlMapper.TypeHandler<DateTimeOffset?>
     {
         public override DateTimeOffset? Parse(object value)
@@ -132,6 +137,7 @@ public static class SqliteWasmDapperTypeHandlers
 
     // ── Bool ─────────────────────────────────────────────────────────────────
 
+    /// <summary>Maps SQLite values to <c>bool</c>.</summary>
     private sealed class BoolHandler : SqlMapper.TypeHandler<bool>
     {
         public override bool Parse(object value) => Convert.ToBoolean(value);
@@ -139,6 +145,7 @@ public static class SqliteWasmDapperTypeHandlers
             => parameter.Value = value ? 1 : 0;
     }
 
+    /// <summary>Maps SQLite values to <c>bool?</c>, returning null for NULL. Registered before the non-nullable handler; see the note on Register.</summary>
     private sealed class NullableBoolHandler : SqlMapper.TypeHandler<bool?>
     {
         public override bool? Parse(object value)
@@ -152,6 +159,7 @@ public static class SqliteWasmDapperTypeHandlers
 
     // ── Guid ─────────────────────────────────────────────────────────────────
 
+    /// <summary>Maps SQLite values to <c>Guid</c>.</summary>
     private sealed class GuidHandler : SqlMapper.TypeHandler<Guid>
     {
         public override Guid Parse(object value)
@@ -160,6 +168,7 @@ public static class SqliteWasmDapperTypeHandlers
             => parameter.Value = value.ToString();
     }
 
+    /// <summary>Maps SQLite values to <c>Guid?</c>, returning null for NULL. Registered before the non-nullable handler; see the note on Register.</summary>
     private sealed class NullableGuidHandler : SqlMapper.TypeHandler<Guid?>
     {
         // Invalid GUID strings return null (consistent with DBNull treatment) rather than throwing.
@@ -174,6 +183,7 @@ public static class SqliteWasmDapperTypeHandlers
 
     // ── Decimal ───────────────────────────────────────────────────────────────
 
+    /// <summary>Maps SQLite values to <c>decimal</c>.</summary>
     private sealed class DecimalHandler : SqlMapper.TypeHandler<decimal>
     {
         public override decimal Parse(object value) => Convert.ToDecimal(value);
@@ -181,6 +191,7 @@ public static class SqliteWasmDapperTypeHandlers
             => parameter.Value = value;
     }
 
+    /// <summary>Maps SQLite values to <c>decimal?</c>, returning null for NULL. Registered before the non-nullable handler; see the note on Register.</summary>
     private sealed class NullableDecimalHandler : SqlMapper.TypeHandler<decimal?>
     {
         public override decimal? Parse(object value)
@@ -194,12 +205,14 @@ public static class SqliteWasmDapperTypeHandlers
 
     // ── int / long / float / double ───────────────────────────────────────────
 
+    /// <summary>Maps SQLite values to <c>int</c>.</summary>
     private sealed class IntHandler : SqlMapper.TypeHandler<int>
     {
         public override int Parse(object value) => Convert.ToInt32(value);
         public override void SetValue(IDbDataParameter parameter, int value) => parameter.Value = value;
     }
 
+    /// <summary>Maps SQLite values to <c>int?</c>, returning null for NULL. Registered before the non-nullable handler; see the note on Register.</summary>
     private sealed class NullableIntHandler : SqlMapper.TypeHandler<int?>
     {
         public override int? Parse(object value)
@@ -211,12 +224,14 @@ public static class SqliteWasmDapperTypeHandlers
             => parameter.Value = value.HasValue ? (object)value.Value : DBNull.Value;
     }
 
+    /// <summary>Maps SQLite values to <c>long</c>.</summary>
     private sealed class LongHandler : SqlMapper.TypeHandler<long>
     {
         public override long Parse(object value) => Convert.ToInt64(value);
         public override void SetValue(IDbDataParameter parameter, long value) => parameter.Value = value;
     }
 
+    /// <summary>Maps SQLite values to <c>long?</c>, returning null for NULL. Registered before the non-nullable handler; see the note on Register.</summary>
     private sealed class NullableLongHandler : SqlMapper.TypeHandler<long?>
     {
         public override long? Parse(object value)
@@ -228,12 +243,14 @@ public static class SqliteWasmDapperTypeHandlers
             => parameter.Value = value.HasValue ? (object)value.Value : DBNull.Value;
     }
 
+    /// <summary>Maps SQLite values to <c>float</c>.</summary>
     private sealed class FloatHandler : SqlMapper.TypeHandler<float>
     {
         public override float Parse(object value) => Convert.ToSingle(value);
         public override void SetValue(IDbDataParameter parameter, float value) => parameter.Value = value;
     }
 
+    /// <summary>Maps SQLite values to <c>float?</c>, returning null for NULL. Registered before the non-nullable handler; see the note on Register.</summary>
     private sealed class NullableFloatHandler : SqlMapper.TypeHandler<float?>
     {
         public override float? Parse(object value)
@@ -245,12 +262,14 @@ public static class SqliteWasmDapperTypeHandlers
             => parameter.Value = value.HasValue ? (object)value.Value : DBNull.Value;
     }
 
+    /// <summary>Maps SQLite values to <c>double</c>.</summary>
     private sealed class DoubleHandler : SqlMapper.TypeHandler<double>
     {
         public override double Parse(object value) => Convert.ToDouble(value);
         public override void SetValue(IDbDataParameter parameter, double value) => parameter.Value = value;
     }
 
+    /// <summary>Maps SQLite values to <c>double?</c>, returning null for NULL. Registered before the non-nullable handler; see the note on Register.</summary>
     private sealed class NullableDoubleHandler : SqlMapper.TypeHandler<double?>
     {
         public override double? Parse(object value)

@@ -50,11 +50,31 @@ const handlers = {
     async open(args) {
         const [dbName, fileName] = args;
         await ensureEngine();
-        if (!registeredVfs.has(fileName)) {
-            const vfs = await IDBBatchAtomicVFS.create(fileName, asyncModule);
-            sqlite3.vfs_register(vfs);
-            registeredVfs.set(fileName, vfs);
+
+        // The map holds the in-flight PROMISE, stored before the await rather than the resolved
+        // VFS stored after it. onmessage is an unserialised async handler, so two `open`
+        // messages run at once; a has()-then-await-then-set sequence lets both pass the check
+        // and both create a VFS. Registering a second one under a name SQLite already holds
+        // evicts the first from the module's callback map, and the next VFS method dispatched
+        // on the evicted one reads a property off undefined - which is where
+        // "Cannot read properties of undefined (reading 'xDeviceCharacteristics')" comes from.
+        let vfsPromise = registeredVfs.get(fileName);
+        if (!vfsPromise) {
+            vfsPromise = IDBBatchAtomicVFS.create(fileName, asyncModule)
+                .then(vfs => {
+                    sqlite3.vfs_register(vfs);
+                    return vfs;
+                })
+                .catch(err => {
+                    // Do not leave a rejected promise cached, or the file can never be opened
+                    // again for the life of the worker.
+                    registeredVfs.delete(fileName);
+                    throw err;
+                });
+            registeredVfs.set(fileName, vfsPromise);
         }
+        await vfsPromise;
+
         currentDb = await sqlite3.open_v2(
             dbName,
             SQLite.SQLITE_OPEN_CREATE | SQLite.SQLITE_OPEN_READWRITE | SQLite.SQLITE_OPEN_URI,
@@ -63,16 +83,29 @@ const handlers = {
         return currentDb;
     },
 
+    // Closes the database and leaves the VFS alone. Tearing the VFS down here was the other
+    // half of the same defect: it closed the IDB connections and cleared the map while SQLite
+    // still held the VFS by name, so the two sides disagreed from that moment on and the next
+    // open registered a duplicate. VFS lifetime belongs to the worker, not to a database
+    // open/close - releasing it is only ever wanted before deleting the file, which is what
+    // releaseFile is for.
     async close() {
         if (currentDb === null) return;
         await sqlite3.close(currentDb);
         currentDb = null;
-        // Close all VFS IDB connections so the IndexedDB lock is released.
-        // Required before indexedDB.deleteDatabase() can succeed.
-        for (const vfs of registeredVfs.values()) {
-            vfs.close();
-        }
-        registeredVfs.clear();
+    },
+
+    // Closes the VFS's IndexedDB connections and forgets it, so indexedDB.deleteDatabase() is
+    // not blocked. Only the delete path should call this: afterwards SQLite still holds a VFS
+    // by this name whose JS side is gone, so the file must not be opened again without a
+    // reload. Callers get that for free - deleting a database is always followed by one.
+    async releaseFile(args) {
+        const [fileName] = args;
+        const vfsPromise = registeredVfs.get(fileName);
+        if (!vfsPromise) return;
+        registeredVfs.delete(fileName);
+        const vfs = await vfsPromise;
+        vfs.close();
     },
 
     /**
@@ -253,27 +286,53 @@ const handlers = {
     },
 };
 
-self.onerror = function (e) {
-    console.error('[sqlite-worker] uncaught error:', e.message || e);
+// Exported so the handlers can be exercised directly by a unit test. A race is not something
+// you can assert against a real browser - you can only watch it sometimes happen. With the
+// engine and the VFS substituted, a test controls the interleaving and the same defect becomes
+// an integer that is wrong every run.
+export { handlers };
+
+export const __testing = {
+    /** Stand in for ensureEngine, which would otherwise fetch and instantiate a wasm module. */
+    setEngine(fakeSqlite3, fakeModule) {
+        sqlite3 = fakeSqlite3;
+        asyncModule = fakeModule ?? {};
+    },
+    reset() {
+        sqlite3 = null;
+        asyncModule = null;
+        currentDb = null;
+        registeredVfs.clear();
+    },
+    get registeredVfs() { return registeredVfs; },
+    get currentDb() { return currentDb; },
 };
 
-self.onunhandledrejection = function (e) {
-    console.error('[sqlite-worker] unhandled rejection:', e.reason);
-};
+// Only wire up the worker plumbing when actually running as a worker. Under a test host there
+// is no `self`, and an unguarded registration would throw at import time.
+if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
+    self.onerror = function (e) {
+        console.error('[sqlite-worker] uncaught error:', e.message || e);
+    };
 
-self.onmessage = async function (e) {
-    const { id, method, args } = e.data;
-    const handler = handlers[method];
-    if (!handler) {
-        self.postMessage({ id, error: `Unknown method: ${method}` });
-        return;
-    }
-    try {
-        const result = await handler(args);
-        self.postMessage({ id, result });
-    } catch (err) {
-        self.postMessage({ id, error: err.message || String(err) });
-    }
-};
+    self.onunhandledrejection = function (e) {
+        console.error('[sqlite-worker] unhandled rejection:', e.reason);
+    };
 
-self.postMessage({ type: 'ready' });
+    self.onmessage = async function (e) {
+        const { id, method, args } = e.data;
+        const handler = handlers[method];
+        if (!handler) {
+            self.postMessage({ id, error: `Unknown method: ${method}` });
+            return;
+        }
+        try {
+            const result = await handler(args);
+            self.postMessage({ id, result });
+        } catch (err) {
+            self.postMessage({ id, error: err.message || String(err) });
+        }
+    };
+
+    self.postMessage({ type: 'ready' });
+}

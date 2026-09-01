@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices.JavaScript;
+﻿using System.Runtime.InteropServices.JavaScript;
 using System.Runtime.Versioning;
 using System.Threading.Tasks;
 
@@ -12,7 +12,10 @@ namespace wa_sqlite.BlazorWasmSqlite;
 [SupportedOSPlatform("browser")]
 public static partial class SqliteJsInterop
 {
+    /// <summary>JS module name the [JSImport] attributes bind to; matches the webpack bundle's export.</summary>
     private const string ModuleName = "sqlite-interop";
+
+    /// <summary>Guards <see cref="InitializeAsync"/> so repeated calls do not re-import the module.</summary>
     private static bool _initialized;
 
     /// <summary>
@@ -149,13 +152,23 @@ public static partial class SqliteJsInterop
     public static partial Task<bool> CheckDatabaseExistsAsync(string fileName);
 
     /// <summary>
-    /// Delete an IndexedDB database by name.
-    /// Does NOT go through the Worker — this is a browser-level IDB operation.
-    /// The caller must close any open <see cref="DBConnection.SqliteWasmConnection"/>
-    /// for this fileName before calling, or the delete will be blocked.
-    /// After deletion, reload the page — <see cref="CheckDatabaseExistsAsync"/> will
-    /// return false and the new database name will be selected automatically.
+    /// Delete an IndexedDB database by name. Prefer
+    /// <see cref="DBConnection.SqliteWasmConnection.DeleteDatabaseAsync"/>.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The JS side closes the database and releases the VFS file before removing it, so the
+    /// caller does not close first. This is the raw interop entry point, however, and it takes
+    /// neither the lease nor the I/O lock: work already in flight is not waited for, and nothing
+    /// stops another caller reopening the file in the window before the IDB delete lands.
+    /// <see cref="DBConnection.SqliteWasmConnection.DeleteDatabaseAsync"/> wraps this in both
+    /// locks and marks the session deleted, which is what makes a query afterwards throw rather
+    /// than silently create an empty database.
+    /// </para>
+    /// <para>
+    /// Reload the page after deleting either way.
+    /// </para>
+    /// </remarks>
     /// <param name="fileName">IDB database name — the same fileName passed to <see cref="OpenAsync"/>.</param>
     [JSImport("deleteDatabase", ModuleName)]
     public static partial Task<bool> DeleteDatabaseAsync(string fileName);

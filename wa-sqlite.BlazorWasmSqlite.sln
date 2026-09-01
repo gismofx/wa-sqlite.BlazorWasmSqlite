@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "wa-sqlite.BlazorWasmSqlite.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "wa-sqlite.BlazorWasmSqlite.Tests", "wa-sqlite.BlazorWasmSqlite.Tests\wa-sqlite.BlazorWasmSqlite.Tests.csproj", "{DCD1EA7C-0DB6-4EE6-912D-1E292E6FF49A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "wa-sqlite.BlazorWasmSqlite.E2ETests", "wa-sqlite.BlazorWasmSqlite.E2ETests\wa-sqlite.BlazorWasmSqlite.E2ETests.csproj", "{E30D672E-B12A-4931-9FB6-B1244C642DC1}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -55,6 +57,18 @@ Global
 		{DCD1EA7C-0DB6-4EE6-912D-1E292E6FF49A}.Release|x64.Build.0 = Release|Any CPU
 		{DCD1EA7C-0DB6-4EE6-912D-1E292E6FF49A}.Release|x86.ActiveCfg = Release|Any CPU
 		{DCD1EA7C-0DB6-4EE6-912D-1E292E6FF49A}.Release|x86.Build.0 = Release|Any CPU
+		{E30D672E-B12A-4931-9FB6-B1244C642DC1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E30D672E-B12A-4931-9FB6-B1244C642DC1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E30D672E-B12A-4931-9FB6-B1244C642DC1}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{E30D672E-B12A-4931-9FB6-B1244C642DC1}.Debug|x64.Build.0 = Debug|Any CPU
+		{E30D672E-B12A-4931-9FB6-B1244C642DC1}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{E30D672E-B12A-4931-9FB6-B1244C642DC1}.Debug|x86.Build.0 = Debug|Any CPU
+		{E30D672E-B12A-4931-9FB6-B1244C642DC1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E30D672E-B12A-4931-9FB6-B1244C642DC1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E30D672E-B12A-4931-9FB6-B1244C642DC1}.Release|x64.ActiveCfg = Release|Any CPU
+		{E30D672E-B12A-4931-9FB6-B1244C642DC1}.Release|x64.Build.0 = Release|Any CPU
+		{E30D672E-B12A-4931-9FB6-B1244C642DC1}.Release|x86.ActiveCfg = Release|Any CPU
+		{E30D672E-B12A-4931-9FB6-B1244C642DC1}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

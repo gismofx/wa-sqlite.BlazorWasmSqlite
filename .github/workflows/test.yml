@@ -19,7 +19,23 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.x'
+          dotnet-version: |
+            8.x
+            10.x
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # The JS tests do not run under VSTest - vitest is a Node runner and Test Explorer only
+      # discovers .NET adapters - so CI is the only place both suites are gated together.
+      # --include=dev is required: webpack, terser and vitest are all devDependencies, and any
+      # runner with NODE_ENV=production installs a tree without them and then reports
+      # "up to date" against it.
+      - name: JS unit tests
+        run: npm install --include=dev --no-audit --no-fund && npm test
+        working-directory: wa-sqlite.BlazorWasmSqlite/NpmJS
 
       - name: Restore
         run: dotnet restore wa-sqlite.BlazorWasmSqlite.Tests/wa-sqlite.BlazorWasmSqlite.Tests.csproj

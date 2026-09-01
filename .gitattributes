@@ -61,3 +61,14 @@
 #*.PDF   diff=astextplain
 #*.rtf   diff=astextplain
 #*.RTF   diff=astextplain
+
+# ── wa-sqlite bundles ────────────────────────────────────────────────────────────────────────
+# The wwwroot bundles are webpack output that happens to be committed, because consumers with a
+# ProjectReference and CI's SkipNpmBuild=true test run both read them straight from the tree.
+#
+# webpack writes LF. Without this, git's autocrlf normalisation rewrites them to CRLF on
+# checkout, every local build writes LF back, and `git status` reports modified files whose
+# `git diff` is empty. That noise is worse than it sounds: it trains you to ignore a dirty tree
+# in exactly the directory where a real change matters most.
+wa-sqlite.BlazorWasmSqlite/wwwroot/*.js -text
+wa-sqlite.BlazorWasmSqlite/wwwroot/*.map -text

@@ -1,7 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <!-- Multi-target rather than move. Consumers still on net8.0 - DVM.Core is one - resolve the
+         net8.0 asset unchanged, while a net10.0 consumer gets a framework-native one. Dropping
+         net8.0 would break them the moment this ships. -->
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -11,7 +14,7 @@
 
   <PropertyGroup>
     <PackageId>wa-sqlite.BlazorWasmSqlite</PackageId>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Authors>gismofx</Authors>
     <Copyright>Copyright © 2026 gismofx</Copyright>
     <Description>Blazor WebAssembly SQLite library backed by IndexedDB, running off the main thread in a Web Worker. Built on @journeyapps/wa-sqlite with Dapper support. Includes automatic JSPI/Asyncify detection for optimal browser compatibility.</Description>
@@ -37,8 +40,22 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Dapper 2.0.4 targets netstandard2.0, so it resolves and runs on net10 unchanged. It is
+         from 2020 and this library's whole design leans on Dapper's open-if-closed/close-after
+         contract, which is an argument for bumping it - but on its own, with the suite as the
+         gate, not bundled with a target-framework change. The tests already run 2.1.72 against
+         it, which is its own smell and the place to start. -->
     <PackageReference Include="Dapper" Version="2.0.4" />
+  </ItemGroup>
+
+  <!-- Framework-matched, so each target gets the Blazor components built for it rather than
+       resolving an older asset by compatibility. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="8.0.11" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.11" />
   </ItemGroup>
 
   <ItemGroup>
@@ -49,12 +66,27 @@
   </ItemGroup>
 	
 	<PropertyGroup>
-		<NpmScript Condition="'$(Configuration)' == 'Release'">prod</NpmScript>
-		<NpmScript Condition="'$(Configuration)' != 'Release'">dev</NpmScript>
+		<!-- Always production, even in Debug. The committed wwwroot bundles ARE the shipped
+		     artifact, so a Debug build emitting development bundles silently replaces them with
+		     something that must never be packed - which is how an unminified worker ended up in
+		     the published 1.0.1. Debugging the worker source is still possible: run
+		     `npm run-script dev` by hand, then restore wwwroot from git to put it back. -->
+		<NpmScript>prod</NpmScript>
 	</PropertyGroup>
 
+	<!-- Runs on every build. An Inputs/Outputs pair was tried here to make it incremental and
+	     did NOT skip, so the attributes are gone rather than left in place describing behaviour
+	     that was not happening. It costs about two seconds, and because the script is pinned to
+	     production the regenerated bundles are byte-identical to the committed ones - verified
+	     with `git diff`, which reports no change after a rebuild. -->
 	<Target Name="InstallAndRunNpm" BeforeTargets="PreBuildEvent" Condition="'$(SkipNpmBuild)' != 'true'">
-		<Exec Command="npm install" WorkingDirectory="NpmJS" />
+		<!-- The include=dev flag below is load-bearing: webpack, webpack-cli and terser are all
+		     devDependencies, and a machine with NODE_ENV=production (or npm config omit=dev)
+		     silently skips them. npm then reports "up to date" against a tree with no
+		     node_modules/.bin, and the next line fails with "'webpack' is not recognized" —
+		     which reads as a broken repo and invites SkipNpmBuild=true, which packs whatever
+		     stale bundles happen to be committed. -->
+		<Exec Command="npm install --include=dev" WorkingDirectory="NpmJS" />
 		<Exec Command="npm run-script $(NpmScript)" WorkingDirectory="NpmJS" />
 	</Target>
 	

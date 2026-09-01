@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -9,6 +9,7 @@ namespace wa_sqlite.BlazorWasmSqlite.DBConnection;
 /// <summary>Parameter collection for <see cref="SqliteWasmCommand"/>.</summary>
 public sealed class SqliteWasmParameterCollection : DbParameterCollection
 {
+    /// <summary>Backing store. Ordinal order is the order parameters were added.</summary>
     private readonly List<SqliteWasmParameter> _parameters = new();
 
     /// <inheritdoc/>

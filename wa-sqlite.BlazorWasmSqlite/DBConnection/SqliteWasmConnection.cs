@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Data.Common;
 using System.Runtime.Versioning;
@@ -14,20 +14,41 @@ namespace wa_sqlite.BlazorWasmSqlite.DBConnection;
 [SupportedOSPlatform("browser")]
 public sealed class SqliteWasmConnection : DbConnection
 {
+    /// <summary>Logical database name, as passed to <c>sqlite3_open_v2</c>.</summary>
     private readonly string _dbName;
+
+    /// <summary>IndexedDB VFS file name. Case-sensitive, like the IDB name it becomes.</summary>
     private readonly string _fileName;
+
+    /// <summary>
+    /// This connection's view of the lease, not the state of the database. Closed here means
+    /// "not holding the lease"; the database itself stays open for the life of the page.
+    /// </summary>
     private ConnectionState _state = ConnectionState.Closed;
 
     /// <summary>Connection handle returned by wa-sqlite open_v2.</summary>
     public int ConnectionHandle { get; private set; }
 
     /// <summary>
-    /// Serializes all Worker round-trips through a single async gate.
-    /// The Worker is sequential but the C# side can fire multiple concurrent
-    /// awaits (e.g. page-load queries), causing responses to be delivered to
-    /// the wrong awaiter and producing corrupt-looking JSON / SQLITE_CORRUPT errors.
+    /// The shared database and its two locks. Was a per-instance <c>SemaphoreSlim</c>, which
+    /// guarded nothing once callers began creating a connection per unit of work — every unit of
+    /// work brought its own lock to a database they all share. See
+    /// <see cref="Worker.SqliteWorkerSession"/>.
     /// </summary>
-    internal readonly SemaphoreSlim WorkerLock = new SemaphoreSlim(1, 1);
+    internal readonly Worker.SqliteWorkerSession Session;
+
+    /// <summary>The only route from this library into the Worker.</summary>
+    internal Worker.ISqliteWorkerBridge Bridge => Session.Bridge;
+
+    /// <summary>
+    /// Set while a transaction is open on this connection. Statements issued inside it must not
+    /// re-enter the I/O lock the transaction is already holding, or the first one deadlocks
+    /// against its own BEGIN.
+    /// </summary>
+    internal SqliteWasmTransaction? ActiveTransaction { get; set; }
+
+    /// <summary>True while this connection holds the lease.</summary>
+    private bool _holdsLease;
 
     /// <summary>
     /// Initialises a connection to the SQLite database stored in IndexedDB.
@@ -35,9 +56,33 @@ public sealed class SqliteWasmConnection : DbConnection
     /// <param name="dbName">Logical database name passed to <c>sqlite3_open_v2</c>.</param>
     /// <param name="fileName">IndexedDB VFS file name — used as the IDB database key.</param>
     public SqliteWasmConnection(string dbName, string fileName)
+        : this(dbName, fileName, Worker.SqliteWorkerSessionRegistry.Default) { }
+
+    /// <summary>
+    /// Test seam: the same connection over a substituted worker, in a registry of its own so
+    /// tests do not share state. Internal, and visible to the test assembly only — a fake bridge
+    /// is what makes the concurrency behaviour assertable outside a browser.
+    /// </summary>
+    internal SqliteWasmConnection(string dbName, string fileName, Worker.ISqliteWorkerBridge bridge)
+        : this(dbName, fileName, new Worker.SqliteWorkerSessionRegistry(() => bridge)) { }
+
+    /// <summary>
+    /// Test seam for behaviour that only appears when connections SHARE a registry — which is
+    /// what the public constructor does. A per-connection session hides it entirely.
+    /// </summary>
+    internal SqliteWasmConnection(string dbName, string fileName, Worker.SqliteWorkerSessionRegistry registry)
+        : this(dbName, fileName, registry.Get(dbName, fileName)) { }
+
+    /// <summary>
+    /// The one real constructor. Deliberately inert: it takes no lease, makes no worker call and
+    /// leaves <see cref="ConnectionHandle"/> at 0, so constructing a connection costs nothing and
+    /// two of them can exist at once without either blocking the other.
+    /// </summary>
+    private SqliteWasmConnection(string dbName, string fileName, Worker.SqliteWorkerSession session)
     {
         _dbName = dbName;
         _fileName = fileName;
+        Session = session;
     }
 
     /// <summary>
@@ -71,11 +116,37 @@ public sealed class SqliteWasmConnection : DbConnection
     /// </summary>
     public override async Task OpenAsync(CancellationToken cancellationToken)
     {
-        if (_state == ConnectionState.Open) return;
-        _state = ConnectionState.Connecting;
-        ConnectionHandle = await SqliteJsInterop.OpenAsync(_dbName, _fileName);
-        _state = ConnectionState.Open;
+        // Idempotent for this connection, and serialised across connections: OpenAsync acquires
+        // the lease, so a second caller waits rather than issuing a second worker `open`.
+        if (_holdsLease) return;
 
+        _state = ConnectionState.Connecting;
+        await Session.AcquireLeaseAsync(cancellationToken);
+        _holdsLease = true;
+        try
+        {
+            ConnectionHandle = await Session.EnsureOpenAsync(_dbName, _fileName, ApplyStartupPragmasAsync);
+            _state = ConnectionState.Open;
+        }
+        catch
+        {
+            _holdsLease = false;
+            _state = ConnectionState.Closed;
+            Session.ReleaseLease();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// PRAGMAs that belong to opening the database rather than to taking the lease, so they run
+    /// inside the shared open task and exactly once per page.
+    /// </summary>
+    /// <param name="handle">
+    /// Passed in rather than read from <see cref="ConnectionHandle"/>, which is not assigned
+    /// until the open task this runs inside has returned.
+    /// </param>
+    private async Task ApplyStartupPragmasAsync(int handle)
+    {
         // Set foundational connection pragmas. These are safe to set unconditionally:
         // - page_size: silently ignored if database already has data (only effective on first
         //   write of a new database). 8192 halves IDB round-trips vs the SQLite default of
@@ -83,24 +154,32 @@ public sealed class SqliteWasmConnection : DbConnection
         // - temp_store: keeps SQLite's internal temp B-trees and sort spills in memory rather
         //   than routing them through the async IDBBatchAtomicVFS. Standard best practice for
         //   all WASM SQLite deployments — temp data is ephemeral and has no durability requirement.
-        await SqliteJsInterop.ExecuteAsync(ConnectionHandle, "PRAGMA page_size=8192", null);
-        await SqliteJsInterop.ExecuteAsync(ConnectionHandle, "PRAGMA temp_store=MEMORY", null);
+        await Bridge.ExecuteAsync(handle, "PRAGMA page_size=8192", null);
+        await Bridge.ExecuteAsync(handle, "PRAGMA temp_store=MEMORY", null);
     }
 
-    /// <summary>Closes the database and releases the IndexedDB VFS lock.</summary>
-    public override async Task CloseAsync()
+    /// <summary>
+    /// Releases exclusive use of the database. Does <b>not</b> close the database itself.
+    /// </summary>
+    /// <remarks>
+    /// There is one database behind every connection, opened once and kept open for the life of
+    /// the page, so closing it here would close it for everyone — which is the defect this
+    /// release exists to remove. Tab close needs no cooperation: the VFS commits its IndexedDB
+    /// transactions with strict durability inside SQLite's own sync, so anything committed is
+    /// already durable and anything else was never promised. The database is closed only
+    /// immediately before it is deleted, which the delete does for you.
+    /// </remarks>
+    public override Task CloseAsync()
     {
-        if (_state == ConnectionState.Closed) return;
-        await SqliteJsInterop.CloseAsync();
-        _state = ConnectionState.Closed;
-        ConnectionHandle = 0;
+        Close();
+        return Task.CompletedTask;
     }
 
-    /// <summary>Closes the connection if open before disposing.</summary>
-    public override async ValueTask DisposeAsync()
+    /// <summary>Releases the lease, like <see cref="CloseAsync"/>.</summary>
+    public override ValueTask DisposeAsync()
     {
-        if (_state != ConnectionState.Closed)
-            await CloseAsync();
+        Close();
+        return default;
     }
 
     // ── Transaction ───────────────────────────────────────────────────
@@ -111,10 +190,24 @@ public sealed class SqliteWasmConnection : DbConnection
 
     /// <summary>
     /// Begins a SQLite transaction. Commit or roll back via the returned
-    /// <see cref="SqliteWasmTransaction"/>.
+    /// <see cref="SqliteWasmTransaction"/>. The connection must already be open.
     /// </summary>
+    /// <exception cref="InvalidOperationException">The connection is closed.</exception>
+    /// <remarks>
+    /// Every ADO.NET provider refuses to begin a transaction on a closed connection, and this
+    /// one has a sharper reason than convention: Dapper opens a closed connection around a
+    /// query, but it does not do so around a transaction it is not starting, so nothing would
+    /// open this one. BEGIN would then be sent with <see cref="ConnectionHandle"/> still 0 -
+    /// which the worker accepts without complaint, leaving a transaction that exists nowhere
+    /// and statements that are not inside it.
+    /// </remarks>
     public async Task<SqliteWasmTransaction> BeginTransactionAsync()
     {
+        if (_state != ConnectionState.Open)
+            throw new InvalidOperationException(
+                "The connection is closed. Call OpenAsync before BeginTransactionAsync - Dapper " +
+                "opens a connection around a query, but not around a transaction it is not starting.");
+
         var txn = new SqliteWasmTransaction(this);
         await txn.BeginAsync();
         return txn;
@@ -137,22 +230,71 @@ public sealed class SqliteWasmConnection : DbConnection
         throw new NotSupportedException("Use OpenAsync. Sync operations are not supported in WASM.");
 
     /// <summary>
-    /// No-op — <see cref="SqliteWasmConnection"/> is long-lived.
-    /// Dapper calls this after queries; passing an already-open connection suppresses it.
-    /// Use <see cref="CloseAsync"/> to explicitly close.
+    /// Releases exclusive use of the database — the other half of <see cref="OpenAsync"/>.
     /// </summary>
+    /// <remarks>
+    /// This is the paired release for the lease that <see cref="OpenAsync"/> takes, which is why
+    /// it is safe synchronously: releasing a semaphore does not wait on anything, and no worker
+    /// round-trip is involved. It is also why Dapper's open-then-close around a query is now the
+    /// intended mechanism rather than a hazard to warn about — the warning that used to be
+    /// printed here was describing a real defect, and the defect is gone.
+    /// </remarks>
     public override void Close()
     {
-        // Dapper calls sync Close() after queries when it opened the connection.
-        // SqliteWasmConnection is a singleton that must stay open — ignore the close
-        // but warn so callers know this happened (e.g. pass connection pre-opened
-        // to Dapper to suppress this path entirely).
-        Console.WriteLine("[wa-sqlite] WARNING: SqliteWasmConnection.Close() called synchronously. " +
-                          "This is a no-op in WASM. Ensure the connection is already Open before " +
-                          "passing it to Dapper to avoid this call.");
+        if (!_holdsLease) return;
+        _holdsLease = false;
+        _state = ConnectionState.Closed;
+        Session.ReleaseLease();
     }
 
     /// <inheritdoc/>
     public override void ChangeDatabase(string databaseName) =>
         throw new NotSupportedException();
+
+    /// <summary>
+    /// Deletes the IndexedDB database, closing it first. The only operation in this library that
+    /// closes the database rather than merely releasing the lease.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Runs under the lease, so it waits for whatever is in flight and nothing can start while
+    /// it runs. Closing and deleting travel on different channels — the close goes through the
+    /// worker, the delete is a main-thread IndexedDB call — and the window between them is
+    /// precisely where another caller could reopen the file, so both happen inside one
+    /// acquisition.
+    /// </para>
+    /// <para>
+    /// Afterwards this session is marked deleted and every later use throws. That is not
+    /// defensiveness: the worker opens with <c>SQLITE_OPEN_CREATE</c>, so a query after a delete
+    /// would otherwise succeed against a brand-new empty database and return no rows. Reload the
+    /// page — which is what a wipe does anyway.
+    /// </para>
+    /// </remarks>
+    /// <param name="fileName">IndexedDB database name, as passed to the constructor.</param>
+    /// <param name="ct">Cancels waiting for the lease, not the delete itself.</param>
+    public async Task DeleteDatabaseAsync(string fileName, CancellationToken ct = default)
+    {
+        var tookLease = !_holdsLease;
+        // Deliberately the delete-flavoured acquisition: an application removing more than one
+        // database deletes them in sequence, and the first must not brick the second.
+        if (tookLease) await Session.AcquireLeaseForDeleteAsync(ct);
+        try
+        {
+            // Both locks, and both are needed. The lease keeps other connections out; the I/O
+            // lock keeps THIS connection's own in-flight work out, which the lease cannot do
+            // because the caller deleting the database is usually already holding it.
+            await Session.RunForDeleteAsync(() => Bridge.DeleteDatabaseAsync(fileName), ct);
+            Session.MarkDeleted();
+            _state = ConnectionState.Closed;
+            ConnectionHandle = 0;
+        }
+        finally
+        {
+            if (tookLease || _holdsLease)
+            {
+                _holdsLease = false;
+                Session.ReleaseLease();
+            }
+        }
+    }
 }

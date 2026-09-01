@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Data.Common;
 using System.Runtime.Versioning;
@@ -12,9 +12,17 @@ namespace wa_sqlite.BlazorWasmSqlite.DBConnection;
 [SupportedOSPlatform("browser")]
 public sealed class SqliteWasmTransaction : DbTransaction
 {
+    /// <summary>The connection this transaction belongs to, and whose I/O lock it holds.</summary>
     private readonly SqliteWasmConnection _connection;
+
+    /// <summary>Set by the first Commit or Rollback, so the second is a no-op rather than a second COMMIT.</summary>
     private bool _completed;
 
+    /// <summary>
+    /// Created only by <see cref="SqliteWasmConnection.BeginTransactionAsync"/>, which has
+    /// already checked the connection is open. Construction does not issue BEGIN -
+    /// <see cref="BeginAsync"/> does, so the failure has somewhere to be awaited.
+    /// </summary>
     internal SqliteWasmTransaction(SqliteWasmConnection connection)
     {
         _connection = connection;
@@ -25,10 +33,40 @@ public sealed class SqliteWasmTransaction : DbTransaction
     /// <inheritdoc/>
     public override IsolationLevel IsolationLevel => IsolationLevel.Serializable;
 
+    /// <summary>
+    /// Enters the exclusive scope and issues BEGIN. Separate from the constructor because it
+    /// awaits, and separate from Commit/Rollback because a failure here must release the scope
+    /// it just took rather than leave the connection wedged.
+    /// </summary>
     internal async Task BeginAsync()
     {
-        await SqliteJsInterop.ExecuteAsync(
-            _connection.ConnectionHandle, "BEGIN TRANSACTION", null);
+        // Hold the I/O lock for the whole transaction. On a single global handle there is no
+        // such thing as another connection's transaction: anything that runs between BEGIN and
+        // COMMIT is inside this one, and a rollback would take that work with it. Statements
+        // issued through this connection reuse the scope rather than re-entering it.
+        await _connection.Session.EnterExclusiveScopeAsync(default);
+        _connection.ActiveTransaction = this;
+        try
+        {
+            await _connection.Bridge.ExecuteAsync(
+                _connection.ConnectionHandle, "BEGIN TRANSACTION", null);
+        }
+        catch
+        {
+            EndScope();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Releases the I/O lock and clears the connection's active transaction. Called from the
+    /// finally of both Commit and Rollback, and guarded so a second call does nothing.
+    /// </summary>
+    private void EndScope()
+    {
+        if (_connection.ActiveTransaction != this) return;
+        _connection.ActiveTransaction = null;
+        _connection.Session.ExitExclusiveScope();
     }
 
     /// <summary>Not supported — use <see cref="CommitAsync"/>.</summary>
@@ -41,21 +79,36 @@ public sealed class SqliteWasmTransaction : DbTransaction
     public async Task CommitAsync()
     {
         if (_completed) return;
-        var result = await SqliteJsInterop.ExecuteAsync(
-            _connection.ConnectionHandle, "COMMIT", null);
-        var error = result.GetPropertyAsString("error");
-        if (!string.IsNullOrEmpty(error))
-            throw new InvalidOperationException($"SQLite COMMIT failed: {error}");
-        _completed = true;
+        try
+        {
+            var result = await _connection.Bridge.ExecuteAsync(
+                _connection.ConnectionHandle, "COMMIT", null);
+            if (!string.IsNullOrEmpty(result.Error))
+                throw new InvalidOperationException($"SQLite COMMIT failed: {result.Error}");
+        }
+        finally
+        {
+            // Release the scope even when COMMIT fails, or a failed transaction locks the
+            // database against every later caller for the life of the page.
+            _completed = true;
+            EndScope();
+        }
     }
 
     /// <summary>Rolls back the transaction. No-op if already completed.</summary>
     public async Task RollbackAsync()
     {
         if (_completed) return;
-        await SqliteJsInterop.ExecuteAsync(
-            _connection.ConnectionHandle, "ROLLBACK", null);
-        _completed = true;
+        try
+        {
+            await _connection.Bridge.ExecuteAsync(
+                _connection.ConnectionHandle, "ROLLBACK", null);
+        }
+        finally
+        {
+            _completed = true;
+            EndScope();
+        }
     }
 
     /// <inheritdoc/>
