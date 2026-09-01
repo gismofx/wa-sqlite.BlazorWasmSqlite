@@ -7,6 +7,8 @@
  * to the original so SqliteWasmInterop.cs needs zero changes.
  */
 
+import { findCaseMismatch } from './nameDiagnostics.js';
+
 let worker = null;
 let nextId = 0;
 const pending = new Map(); // id → { resolve, reject }
@@ -72,6 +74,30 @@ function invoke(method, ...args) {
 }
 
 /**
+ * Say something when the requested database does not exist but one differing only in case does.
+ *
+ * SQLite opens with SQLITE_OPEN_CREATE, so a wrong name does not fail - it quietly creates a new
+ * empty database and the application finds no data. IndexedDB names are case-sensitive and
+ * people are not, so this is the mistake that actually happens. Diagnostic only: it never
+ * changes which database is opened, because an application may legitimately own both spellings.
+ */
+async function warnOnCaseMismatch(fileName) {
+    try {
+        if (typeof indexedDB.databases !== 'function') return;
+        const names = (await indexedDB.databases()).map(d => d.name);
+        const actual = findCaseMismatch(fileName, names);
+        if (actual) {
+            console.warn(
+                `[wa-sqlite] No IndexedDB database named '${fileName}'. One named '${actual}' ` +
+                `exists - these names are case-sensitive, so opening '${fileName}' will create a ` +
+                `new empty database rather than open '${actual}'.`);
+        }
+    } catch {
+        // A diagnostic must never be able to stop an open from happening.
+    }
+}
+
+/**
  * Public API — identical signatures to the original window.sqlite.*
  * so SqliteWasmInterop.cs requires zero changes.
  */
@@ -82,6 +108,7 @@ window.sqlite = {
 
     open: async function (dbName, fileName) {
         await ensureWorker();
+        await warnOnCaseMismatch(fileName);
         return await invoke('open', dbName, fileName);
     },
 
