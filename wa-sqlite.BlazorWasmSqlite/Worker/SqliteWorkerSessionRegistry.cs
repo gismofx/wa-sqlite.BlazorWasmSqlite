@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 
 namespace wa_sqlite.BlazorWasmSqlite.Worker;
@@ -22,6 +22,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Worker;
 /// </remarks>
 internal sealed class SqliteWorkerSessionRegistry
 {
+    /// <summary>Makes the bridge for a session the first time that database is named.</summary>
     private readonly Func<ISqliteWorkerBridge> _bridgeFactory;
     // Ordinal, declared rather than inherited from the default comparer. Both names are
     // case-sensitive in the platforms underneath: IndexedDB compares database names as strings,
@@ -32,6 +33,8 @@ internal sealed class SqliteWorkerSessionRegistry
     private readonly ConcurrentDictionary<string, SqliteWorkerSession> _sessions =
         new(StringComparer.Ordinal);
 
+    /// <summary>Creates a registry whose sessions are built from <paramref name="bridgeFactory"/>.</summary>
+    /// <param name="bridgeFactory">Invoked once per distinct database, not once per connection.</param>
     public SqliteWorkerSessionRegistry(Func<ISqliteWorkerBridge> bridgeFactory) =>
         _bridgeFactory = bridgeFactory;
 
@@ -39,11 +42,19 @@ internal sealed class SqliteWorkerSessionRegistry
     public static SqliteWorkerSessionRegistry Default { get; } =
         new(() => new JsInteropWorkerBridge());
 
+    /// <summary>
+    /// The session for one database, created on first use. Two callers naming the same database
+    /// get the same session and therefore the same lease, handle and I/O lock; two callers
+    /// naming different databases get neither.
+    /// </summary>
     public SqliteWorkerSession Get(string dbName, string fileName) =>
         _sessions.GetOrAdd(Key(dbName, fileName), _ => new SqliteWorkerSession(_bridgeFactory()));
 
     // A NUL separator rather than a printable one: no database is legitimately named "a\0b",
     // whereas one named "a:b" might be, and a separator that can appear in a name lets two
     // different databases collide on one key - which is the bug this class exists to fix.
+    /// <summary>
+    /// Both names, separated by a NUL so no pair of names can collide with another pair.
+    /// </summary>
     private static string Key(string dbName, string fileName) => $"{dbName}\0{fileName}";
 }

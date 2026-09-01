@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data;
@@ -18,7 +18,10 @@ namespace wa_sqlite.BlazorWasmSqlite.DBConnection;
 [SupportedOSPlatform("browser")]
 public sealed class SqliteWasmCommand : DbCommand
 {
+    /// <summary>Parameters for this command, serialized to JSON for the Worker at execution time.</summary>
     private readonly SqliteWasmParameterCollection _parameters = new();
+
+    /// <summary>The connection whose session gates this command. Null until one is assigned.</summary>
     private SqliteWasmConnection? _connection;
 
     /// <summary>Initialises a command with no text or connection.</summary>
@@ -74,6 +77,10 @@ public sealed class SqliteWasmCommand : DbCommand
     /// <inheritdoc/>
     protected override DbParameter CreateDbParameter() => new SqliteWasmParameter();
 
+    /// <summary>
+    /// The command's parameters as a JSON object, or <c>null</c> when there are none - the
+    /// Worker treats a missing payload and an empty one differently.
+    /// </summary>
     private string? SerializeParameters()
     {
         var dict = _parameters.ToDictionary();

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Data.Common;
 using System.Runtime.Versioning;
@@ -14,8 +14,16 @@ namespace wa_sqlite.BlazorWasmSqlite.DBConnection;
 [SupportedOSPlatform("browser")]
 public sealed class SqliteWasmConnection : DbConnection
 {
+    /// <summary>Logical database name, as passed to <c>sqlite3_open_v2</c>.</summary>
     private readonly string _dbName;
+
+    /// <summary>IndexedDB VFS file name. Case-sensitive, like the IDB name it becomes.</summary>
     private readonly string _fileName;
+
+    /// <summary>
+    /// This connection's view of the lease, not the state of the database. Closed here means
+    /// "not holding the lease"; the database itself stays open for the life of the page.
+    /// </summary>
     private ConnectionState _state = ConnectionState.Closed;
 
     /// <summary>Connection handle returned by wa-sqlite open_v2.</summary>
@@ -65,6 +73,11 @@ public sealed class SqliteWasmConnection : DbConnection
     internal SqliteWasmConnection(string dbName, string fileName, Worker.SqliteWorkerSessionRegistry registry)
         : this(dbName, fileName, registry.Get(dbName, fileName)) { }
 
+    /// <summary>
+    /// The one real constructor. Deliberately inert: it takes no lease, makes no worker call and
+    /// leaves <see cref="ConnectionHandle"/> at 0, so constructing a connection costs nothing and
+    /// two of them can exist at once without either blocking the other.
+    /// </summary>
     private SqliteWasmConnection(string dbName, string fileName, Worker.SqliteWorkerSession session)
     {
         _dbName = dbName;
@@ -124,6 +137,14 @@ public sealed class SqliteWasmConnection : DbConnection
         }
     }
 
+    /// <summary>
+    /// PRAGMAs that belong to opening the database rather than to taking the lease, so they run
+    /// inside the shared open task and exactly once per page.
+    /// </summary>
+    /// <param name="handle">
+    /// Passed in rather than read from <see cref="ConnectionHandle"/>, which is not assigned
+    /// until the open task this runs inside has returned.
+    /// </param>
     private async Task ApplyStartupPragmasAsync(int handle)
     {
         // Set foundational connection pragmas. These are safe to set unconditionally:
@@ -169,10 +190,24 @@ public sealed class SqliteWasmConnection : DbConnection
 
     /// <summary>
     /// Begins a SQLite transaction. Commit or roll back via the returned
-    /// <see cref="SqliteWasmTransaction"/>.
+    /// <see cref="SqliteWasmTransaction"/>. The connection must already be open.
     /// </summary>
+    /// <exception cref="InvalidOperationException">The connection is closed.</exception>
+    /// <remarks>
+    /// Every ADO.NET provider refuses to begin a transaction on a closed connection, and this
+    /// one has a sharper reason than convention: Dapper opens a closed connection around a
+    /// query, but it does not do so around a transaction it is not starting, so nothing would
+    /// open this one. BEGIN would then be sent with <see cref="ConnectionHandle"/> still 0 -
+    /// which the worker accepts without complaint, leaving a transaction that exists nowhere
+    /// and statements that are not inside it.
+    /// </remarks>
     public async Task<SqliteWasmTransaction> BeginTransactionAsync()
     {
+        if (_state != ConnectionState.Open)
+            throw new InvalidOperationException(
+                "The connection is closed. Call OpenAsync before BeginTransactionAsync - Dapper " +
+                "opens a connection around a query, but not around a transaction it is not starting.");
+
         var txn = new SqliteWasmTransaction(this);
         await txn.BeginAsync();
         return txn;

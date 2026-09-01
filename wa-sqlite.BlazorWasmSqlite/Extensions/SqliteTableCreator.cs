@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -137,6 +137,10 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             return att;
         }
 
+        /// <summary>
+        /// One CREATE INDEX statement per property marked <c>[SqliteColumn(Index = true)]</c>.
+        /// Returned after the CREATE TABLE so a caller can execute the list in order.
+        /// </summary>
         private static List<string> GenerateColumnIndexes(IEnumerable<PropertyInfo> props, string tableName)
         {
             return props

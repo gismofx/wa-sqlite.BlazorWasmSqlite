@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -13,12 +13,22 @@ namespace wa_sqlite.BlazorWasmSqlite.DBConnection;
 /// </summary>
 internal sealed class SqliteWasmDbDataReader : DbDataReader
 {
+    /// <summary>Every row, already materialised - the Worker returns the whole result set at once.</summary>
     private readonly List<Dictionary<string, JsonElement>> _rows;
+
+    /// <summary>Column names in ordinal order.</summary>
     private readonly string[] _columns;
+
+    /// <summary>Rows affected, or -1 for a query.</summary>
     private readonly int _recordsAffected;
+
+    /// <summary>Cursor position. -1 until the first <see cref="Read"/>.</summary>
     private int _currentRow = -1;
+
+    /// <summary>Set by Close; there is no unmanaged resource to release.</summary>
     private bool _closed;
 
+    /// <summary>Wraps a result set the Worker has already returned in full.</summary>
     internal SqliteWasmDbDataReader(
         List<Dictionary<string, JsonElement>> rows,
         string[] columns,
@@ -75,6 +85,7 @@ internal sealed class SqliteWasmDbDataReader : DbDataReader
 
     // ── Value access ──────────────────────────────────────────────────
 
+    /// <summary>The current row's value at <paramref name="ordinal"/>, as a raw JSON element.</summary>
     private JsonElement GetElement(int ordinal)
     {
         var row = _rows[_currentRow];

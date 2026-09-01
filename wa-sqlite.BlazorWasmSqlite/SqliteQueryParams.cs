@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 
 namespace wa_sqlite.BlazorWasmSqlite;
@@ -9,6 +9,7 @@ namespace wa_sqlite.BlazorWasmSqlite;
 [Obsolete("Use Dapper anonymous objects or DynamicParameters instead. SqliteQueryParams will be removed in a future release.", error: false)]
 public class SqliteQueryParams : IDictionary<string, object>
 {
+    /// <summary>Named parameters, serialized to a JSON object for the Worker.</summary>
     private Dictionary<string, object> _params = new();
 
     /// <summary>Initialises an empty parameter collection.</summary>

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Data.Common;
 using System.Runtime.Versioning;
@@ -12,9 +12,17 @@ namespace wa_sqlite.BlazorWasmSqlite.DBConnection;
 [SupportedOSPlatform("browser")]
 public sealed class SqliteWasmTransaction : DbTransaction
 {
+    /// <summary>The connection this transaction belongs to, and whose I/O lock it holds.</summary>
     private readonly SqliteWasmConnection _connection;
+
+    /// <summary>Set by the first Commit or Rollback, so the second is a no-op rather than a second COMMIT.</summary>
     private bool _completed;
 
+    /// <summary>
+    /// Created only by <see cref="SqliteWasmConnection.BeginTransactionAsync"/>, which has
+    /// already checked the connection is open. Construction does not issue BEGIN -
+    /// <see cref="BeginAsync"/> does, so the failure has somewhere to be awaited.
+    /// </summary>
     internal SqliteWasmTransaction(SqliteWasmConnection connection)
     {
         _connection = connection;
@@ -25,6 +33,11 @@ public sealed class SqliteWasmTransaction : DbTransaction
     /// <inheritdoc/>
     public override IsolationLevel IsolationLevel => IsolationLevel.Serializable;
 
+    /// <summary>
+    /// Enters the exclusive scope and issues BEGIN. Separate from the constructor because it
+    /// awaits, and separate from Commit/Rollback because a failure here must release the scope
+    /// it just took rather than leave the connection wedged.
+    /// </summary>
     internal async Task BeginAsync()
     {
         // Hold the I/O lock for the whole transaction. On a single global handle there is no
@@ -45,6 +58,10 @@ public sealed class SqliteWasmTransaction : DbTransaction
         }
     }
 
+    /// <summary>
+    /// Releases the I/O lock and clears the connection's active transaction. Called from the
+    /// finally of both Commit and Rollback, and guarded so a second call does nothing.
+    /// </summary>
     private void EndScope()
     {
         if (_connection.ActiveTransaction != this) return;

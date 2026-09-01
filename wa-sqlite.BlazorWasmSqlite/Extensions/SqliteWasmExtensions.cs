@@ -20,11 +20,19 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
     /// </summary>
     public static class SqliteWasmExtensions
     {
+        // Reflection results, cached by type handle. Reflection is the expensive part of every
+        // call below, and an entity type's shape cannot change at runtime.
+        /// <summary>Cached [Key] properties per entity type.</summary>
         private static readonly ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>> KeyProperties = new ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>>();
+        /// <summary>Cached [ExplicitKey] properties per entity type.</summary>
         private static readonly ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>> ExplicitKeyProperties = new ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>>();
+        /// <summary>Cached writeable properties per entity type.</summary>
         private static readonly ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>> TypeProperties = new ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>>();
+        /// <summary>Cached [Computed] properties per entity type - excluded from writes.</summary>
         private static readonly ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>> ComputedProperties = new ConcurrentDictionary<RuntimeTypeHandle, IEnumerable<PropertyInfo>>();
+        /// <summary>Cached SELECT-by-key SQL per entity type.</summary>
         private static readonly ConcurrentDictionary<RuntimeTypeHandle, string> GetQueries = new ConcurrentDictionary<RuntimeTypeHandle, string>();
+        /// <summary>Cached table name per entity type, from [Table] or the type name.</summary>
         private static readonly ConcurrentDictionary<RuntimeTypeHandle, string> TypeTableName = new ConcurrentDictionary<RuntimeTypeHandle, string>();
 
 
@@ -79,6 +87,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             return GetAllColumns(type);
         }
 
+        /// <summary>[Computed] properties for <paramref name="type"/>, reflecting once and caching.</summary>
         private static List<PropertyInfo> ComputedPropertiesCache(Type type)
         {
             if (ComputedProperties.TryGetValue(type.TypeHandle, out IEnumerable<PropertyInfo>? pi))
@@ -200,6 +209,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
                 $"PRAGMA table_info({tableName})");
         }
 
+        /// <summary>[ExplicitKey] properties for <paramref name="type"/>, reflecting once and caching.</summary>
         private static List<PropertyInfo> ExplicitKeyPropertiesCache(Type type)
         {
             if (ExplicitKeyProperties.TryGetValue(type.TypeHandle, out IEnumerable<PropertyInfo>? pi))
@@ -213,6 +223,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             return explicitKeyProperties;
         }
 
+        /// <summary>[Key] properties for <paramref name="type"/>, reflecting once and caching.</summary>
         private static List<PropertyInfo> KeyPropertiesCache(Type type)
         {
             if (KeyProperties.TryGetValue(type.TypeHandle, out IEnumerable<PropertyInfo>? pi))
@@ -236,6 +247,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             return keyProperties;
         }
 
+        /// <summary>Writeable properties for <paramref name="type"/>, reflecting once and caching.</summary>
         private static List<PropertyInfo> TypePropertiesCache(Type type)
         {
             if (TypeProperties.TryGetValue(type.TypeHandle, out IEnumerable<PropertyInfo>? pis))
@@ -248,6 +260,7 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             return properties.ToList();
         }
 
+        /// <summary>False when the property is marked <c>[Write(false)]</c>.</summary>
         private static bool IsWriteable(PropertyInfo pi)
         {
             // [SqliteColumnIgnore] excludes from all SQLite operations (schema, insert, update)

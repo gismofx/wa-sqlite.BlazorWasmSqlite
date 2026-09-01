@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -42,11 +42,22 @@ namespace wa_sqlite.BlazorWasmSqlite.Worker;
 /// </remarks>
 internal sealed class SqliteWorkerSession
 {
+    /// <summary>Who may use the database. Taken by OpenAsync, returned by Close/Dispose.</summary>
     private readonly SemaphoreSlim _lease = new(1, 1);
+
+    /// <summary>Whether two worker round-trips may be in flight at once. They may not.</summary>
     private readonly SemaphoreSlim _io = new(1, 1);
+
+    /// <summary>
+    /// The one open. Held as the in-flight task rather than a bool so concurrent callers await
+    /// the same open instead of racing to issue a second one.
+    /// </summary>
     private Task<int>? _openTask;
+
+    /// <summary>Set once the database has been deleted; never cleared for this session.</summary>
     private bool _deleted;
 
+    /// <summary>Why a call after a delete throws instead of quietly opening a new database.</summary>
     private const string DeletedMessage =
         "The database has been deleted. Reload the page before using it again — reopening now " +
         "would silently create a new empty one, because SQLite opens with SQLITE_OPEN_CREATE.";
@@ -66,13 +77,18 @@ internal sealed class SqliteWorkerSession
         _openTask = null;
     }
 
+    /// <summary>Throws if the database is gone. Called on the way in and out of the lease.</summary>
     private void ThrowIfDeleted()
     {
         if (_deleted) throw new InvalidOperationException(DeletedMessage);
     }
 
+    /// <summary>Creates a session over one worker bridge.</summary>
+    /// <param name="bridge">The forwarder to the Web Worker. A fake here is what makes the
+    /// concurrency behaviour assertable outside a browser.</param>
     public SqliteWorkerSession(ISqliteWorkerBridge bridge) => Bridge = bridge;
 
+    /// <summary>The only route from this library into the Worker.</summary>
     public ISqliteWorkerBridge Bridge { get; }
 
     /// <summary>
@@ -94,6 +110,19 @@ internal sealed class SqliteWorkerSession
     /// </remarks>
     public Task AcquireLeaseForDeleteAsync(CancellationToken ct) => AcquireLeaseAsync(ct, forDelete: true);
 
+    /// <summary>
+    /// The one implementation behind both public acquisitions.
+    /// </summary>
+    /// <param name="ct">Cancels the wait.</param>
+    /// <param name="forDelete">
+    /// Skips the deleted check at both ends. A delete must stay legal after the database is
+    /// already gone: an application wiping more than one database deletes them in sequence, and
+    /// the first delete must not brick the second.
+    /// </param>
+    /// <exception cref="TimeoutException">
+    /// The lease did not come free within <see cref="LeaseTimeout"/>. A leaked lease would
+    /// otherwise hang the page with no symptom but slowness.
+    /// </exception>
     private async Task AcquireLeaseAsync(CancellationToken ct, bool forDelete)
     {
         if (!forDelete) ThrowIfDeleted();
@@ -128,6 +157,10 @@ internal sealed class SqliteWorkerSession
     public Task<int> EnsureOpenAsync(string dbName, string fileName, Func<int, Task>? onFirstOpen = null) =>
         _openTask ??= OpenOnceAsync(dbName, fileName, onFirstOpen);
 
+    /// <summary>
+    /// The body of the shared open task. Runs exactly once per session, however many callers
+    /// await it, and applies the first-open callback before returning the handle to any of them.
+    /// </summary>
     private async Task<int> OpenOnceAsync(string dbName, string fileName, Func<int, Task>? onFirstOpen)
     {
         var handle = await Bridge.OpenAsync(dbName, fileName).ConfigureAwait(false);
