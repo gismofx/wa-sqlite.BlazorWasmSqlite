@@ -5,8 +5,9 @@
   "private": true,
   "scripts": {
     "dev": "webpack --mode=development",
-    "prod": "webpack --mode=production",
-    "test": "vitest run"
+    "prod": "webpack --mode=production && node verify-chunks.js",
+    "test": "vitest run",
+    "verify": "node verify-chunks.js"
   },
   "devDependencies": {
     "vitest": "^2.1.8",

@@ -14,7 +14,7 @@
 
   <PropertyGroup>
     <PackageId>wa-sqlite.BlazorWasmSqlite</PackageId>
-    <Version>1.1.1</Version>
+    <Version>1.1.2</Version>
     <Authors>gismofx</Authors>
     <Copyright>Copyright © 2026 gismofx</Copyright>
     <Description>Blazor WebAssembly SQLite library backed by IndexedDB, running off the main thread in a Web Worker. Built on @journeyapps/wa-sqlite with Dapper support. Includes automatic JSPI/Asyncify detection for optimal browser compatibility.</Description>
