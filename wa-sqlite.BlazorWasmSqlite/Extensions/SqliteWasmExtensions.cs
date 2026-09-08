@@ -146,7 +146,16 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
         /// <param name="records">Entities to upsert. Must be non-empty.</param>
         /// <param name="primaryKey">Primary key column name (default <c>"Id"</c>).</param>
         /// <param name="rowsPerStatement">Rows per INSERT statement (default 100).</param>
-        /// <param name="ct">Cancellation token.</param>
+        /// <param name="transaction">
+        /// The transaction this write belongs to, or <c>null</c> for a standalone write. Pass it
+        /// whenever the write is inside one: the transaction already holds the connection's I/O
+        /// gate, and a bulk write that re-enters that gate deadlocks against its own BEGIN.
+        /// Membership follows the same rule as <see cref="DBConnection.SqliteWasmCommand"/> — the
+        /// transaction this call was handed, not whatever the connection has open — so an
+        /// unrelated caller still queues rather than joining a transaction it knows nothing about.
+        /// </param>
+        /// <param name="ct">Cancellation token. Not observed when a transaction is supplied, since
+        /// the write is then not waiting on the gate.</param>
         /// <returns>Total rows affected.</returns>
         [SupportedOSPlatform("browser")]
         public static async Task<int> UpsertAsync<T>(
@@ -155,18 +164,27 @@ namespace wa_sqlite.BlazorWasmSqlite.Extensions
             IEnumerable<T> records,
             string primaryKey = "Id",
             int rowsPerStatement = 100,
+            SqliteWasmTransaction? transaction = null,
             CancellationToken ct = default)
         {
             try
             {
                 var payload = SqliteWorkerPayloadBuilder.BuildUpsertPayload(
                     tableName, records, primaryKey, rowsPerStatement);
-                // Through the gate like every other worker round-trip. A bulk insert is the
-                // longest-running call the library makes, so it is the one most likely to have
-                // something else land on top of it.
-                var result = await connection.Session.RunExclusiveAsync(
-                    () => connection.Bridge.BulkInsertRawUpsertAsync(connection.ConnectionHandle, payload),
-                    ct);
+                // Through the gate like every other worker round-trip — unless the caller passed a
+                // transaction, in which case the gate is already held by it and re-entering would
+                // deadlock the write against its own BEGIN. Same membership rule as
+                // SqliteWasmCommand.RunAsync: decided by the transaction THIS CALL was given, not
+                // by whether the connection happens to have one open, so an unrelated caller still
+                // queues instead of silently joining a transaction it knows nothing about.
+                //
+                // A bulk insert is the longest-running call the library makes, so it is both the
+                // one most worth serialising and the one that deadlocks hardest if it re-enters.
+                var result = transaction is not null
+                    ? await connection.Bridge.BulkInsertRawUpsertAsync(connection.ConnectionHandle, payload)
+                    : await connection.Session.RunExclusiveAsync(
+                        () => connection.Bridge.BulkInsertRawUpsertAsync(connection.ConnectionHandle, payload),
+                        ct);
 
                 if (result.FirstError != null)
                     throw new InvalidOperationException(
